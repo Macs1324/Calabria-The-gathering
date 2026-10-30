@@ -14,6 +14,7 @@ import {
   reconcile,
   sameObservation,
 } from "./matWatch";
+import { Icon } from "./Icon";
 
 const MAX_WIDTH = 1280; // frames are downscaled before upload; plenty for 256-bit hashes
 const TICK_MS = 300; // motion check cadence
@@ -269,28 +270,19 @@ export function MatCamera({
     off: "Camera off",
     starting: "Starting camera…",
     watching: watch
-      ? `Watching your mat · ${seen.length} card${seen.length === 1 ? "" : "s"}`
-      : "Camera ready",
+      ? `Watching · ${seen.length} card${seen.length === 1 ? "" : "s"}`
+      : "Ready",
     moving: "Hold still…",
     scanning: "Looking…",
     error: "Camera unavailable",
   };
 
   return (
-    <section className="panel mat-camera">
-      <div className="panel-head">
-        <h4>Mat camera</h4>
-        <span className={`status-pill ${status}`}>{label[status]}</span>
-        <button className="ghost close-btn" onClick={onClose} title="Turn the camera off">
-          ✕
-        </button>
-      </div>
-      {(problem || scanError) && (
-        <p className="error">{problem ?? scanError}</p>
-      )}
-      <div className="video-wrap">
+    <section className="dock-section mat-camera">
+      <div className="cam-frame">
         <video ref={videoRef} autoPlay playsInline muted />
         <svg
+          className="overlay"
           viewBox={`0 0 ${frameSize[0]} ${frameSize[1]}`}
           preserveAspectRatio="xMidYMid meet"
         >
@@ -302,28 +294,39 @@ export function MatCamera({
             />
           ))}
         </svg>
+        <span className={`cam-status ${status}`}>
+          <span className="dot" />
+          {label[status]}
+        </span>
+        <button
+          className="icon-btn cam-close"
+          aria-label="Turn the camera off"
+          data-tip="Camera off"
+          onClick={onClose}
+        >
+          <Icon name="x" size={16} />
+        </button>
+        {(problem || scanError) && (
+          <p className="cam-error">{problem ?? scanError}</p>
+        )}
       </div>
-      <div className="row">
+      <div className="cam-controls">
         <label
           className="switch"
           title="Play, tap and untap cards by moving them on your mat"
         >
           <input
             type="checkbox"
+            role="switch"
             checked={watch}
             onChange={(e) => setWatch(e.currentTarget.checked)}
           />
-          <span>Auto-play from mat</span>
+          <span className="track" />
+          Auto-play
         </label>
-        <button
-          onClick={manualScan}
-          disabled={!!problem}
-          title="Scan the card you hold up (Space)"
-        >
-          Scan <kbd>Space</kbd>
-        </button>
         {devices.length > 1 && (
           <select
+            aria-label="Camera"
             value={deviceId}
             onChange={(e) => {
               setDeviceId(e.currentTarget.value);
@@ -338,10 +341,18 @@ export function MatCamera({
             ))}
           </select>
         )}
+        <button
+          onClick={manualScan}
+          disabled={!!problem}
+          title="Scan the card you hold up (Space)"
+        >
+          <Icon name="scan" size={16} />
+          Scan <kbd>Space</kbd>
+        </button>
       </div>
-      <p className="hint muted">
+      <p className="hint">
         {watch
-          ? "Put cards down, tap or untap them, take them away: the table follows. Unsure cards ask first."
+          ? "Lay cards down, tap or untap them, take them away — the table follows. Unsure cards ask first."
           : "Hold one card flat under the camera and press Space."}
       </p>
     </section>

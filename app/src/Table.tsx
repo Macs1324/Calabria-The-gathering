@@ -398,23 +398,28 @@ export function Table({
                   onClose={() => setCamera(false)}
                 />
               ) : (
-                <section className="panel go-hands-free">
-                  <h4>Play hands-free</h4>
-                  <p className="muted small">
-                    Point your webcam at your mat: cards you lay down, tap and
-                    take away are tracked for you.
-                  </p>
-                  <button className="primary" onClick={() => setCamera(true)}>
-                    📷 Turn on mat camera
-                  </button>
+                <section className="dock-section">
+                  <div className="cam-frame off">
+                    <Icon name="camera" size={26} />
+                    <strong>Play hands-free</strong>
+                    <p>
+                      Point your webcam at your mat. Cards you lay down, tap
+                      and take away are tracked for you.
+                    </p>
+                    <button onClick={() => setCamera(true)}>
+                      Turn on mat camera
+                    </button>
+                  </div>
                 </section>
               )}
               <AddCard onPlay={(card, opts) => playCard(card, "", opts)} />
             </>
           ) : (
-            <p className="muted panel small">
-              Watching. Join from the lobby to play.
-            </p>
+            <section className="dock-section">
+              <p className="muted small">
+                You're watching. Join from the lobby to take a seat.
+              </p>
+            </section>
           )}
           <Log log={view.log} state={state} />
         </aside>
