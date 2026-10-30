@@ -6,10 +6,10 @@ the room store survives restarts by replaying a per-room JSON log.
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from calabria.api.main import create_app
 from calabria.game.store import RoomStore
-
 
 # --- store ---------------------------------------------------------------------
 
@@ -188,7 +188,11 @@ def test_ws_spectator_is_read_only():
 
 
 def test_ws_unknown_room_closes():
-    with TestClient(create_app()) as c:
-        with pytest.raises(Exception):
-            with c.websocket_connect("/rooms/ZZZZ/ws") as ws:
-                ws.receive_json()
+    with TestClient(create_app()) as c, pytest.raises(WebSocketDisconnect):
+        c.websocket_connect("/rooms/ZZZZ/ws").__enter__()
+
+
+def test_corrupt_room_file_is_skipped(tmp_path):
+    (tmp_path / "BAD1.json").write_text("{not json")
+    store = RoomStore(tmp_path)
+    assert store.get("BAD1") is None
