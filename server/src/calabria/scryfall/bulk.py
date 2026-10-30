@@ -33,10 +33,15 @@ class BulkFileInfo:
 
 def fetch_bulk_listing(*, client: httpx.Client | None = None) -> dict[str, Any]:
     """One listing request (the only api.scryfall.com call per refresh)."""
-    with client or httpx.Client() as c:  # pragma: no cover - http plumbing
+    owned = client is None
+    c = client or httpx.Client()
+    try:
         response = c.get(BULK_DATA_URL, headers={"User-Agent": USER_AGENT})
         response.raise_for_status()
         return response.json()
+    finally:
+        if owned:
+            c.close()
 
 
 def choose_artwork_file(listing: dict[str, Any]) -> BulkFileInfo:
@@ -59,15 +64,18 @@ def download_bulk_file(
     client: httpx.Client | None = None,
 ) -> Path:
     """Stream a bulk JSONL file to `dest` (CDN, no API rate limit applies)."""
-    with (
-        client or httpx.Client() as c,  # pragma: no cover - http plumbing
-        c.stream("GET", download_uri, headers={"User-Agent": USER_AGENT}) as response,
-    ):
-        response.raise_for_status()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with dest.open("wb") as fh:
-            for chunk in response.iter_bytes():
-                fh.write(chunk)
+    owned = client is None
+    c = client or httpx.Client()
+    try:
+        with c.stream("GET", download_uri, headers={"User-Agent": USER_AGENT}) as response:
+            response.raise_for_status()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with dest.open("wb") as fh:
+                for chunk in response.iter_bytes():
+                    fh.write(chunk)
+    finally:
+        if owned:
+            c.close()
     return dest
 
 
