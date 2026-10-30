@@ -1,14 +1,23 @@
 # Calabria: The Gathering — client
 
-Tauri v2 + React client: webcam capture, scan/confirm flow, live battlefield.
+React client: lobby, live table, card search, webcam scan + confirm. Built
+once and served by the server at `/`, so players just open the server URL in
+a browser — nothing to install.
 
 ```sh
 pnpm install
-pnpm tauri dev     # dev shell must be active: nix develop
+pnpm build          # -> dist/, picked up by the server (CALABRIA_WEB_DIR, default ../app/dist)
+pnpm dev            # hot reload on :1420, proxying API + WebSocket calls to a local server on :8000
 ```
 
-First `tauri dev` run compiles the Rust shell for a few minutes. The camera
-permission prompt appears on first capture (macOS/Windows handle this natively;
-on Linux, the WebKitGTK dialog is used).
+The camera only works on `https://` pages or `localhost` (browser rule) —
+see the root README's Hosting section.
 
-See the repository root README and docs/architecture.md for scope.
+The Tauri shell (`pnpm tauri dev`) still builds and asks for a server URL on
+the lobby screen, but the browser is the supported way to play: WebKitGTK
+(Tauri's Linux webview) is unreliable with webcams.
+
+Shortcuts on the table: click a card to select it, then `T` tap, `G`/`E`/`C`
+graveyard/exile/command, `H`/`L` hand/library, `B` battlefield, `Esc`
+deselect; double-click taps; `Ctrl+Z` undoes your last action; `Space` scans
+when the camera is open.
