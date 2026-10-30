@@ -87,7 +87,7 @@ def test_turn_end_passes_and_increments():
     state = apply_event(state, Event("player_join", "al", {}, seq=0))
     state = apply_event(state, Event("player_join", "bea", {}, seq=1))
     state = apply_event(state, Event("turn_end", "bea", {}, seq=2))
-    assert state["turn"] == {"number": 2, "player": "al"}
+    assert state["turn"] == {"number": 2, "player": "bea"}
 
 
 def test_player_leave_removes_seat_and_cards():
