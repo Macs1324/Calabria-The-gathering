@@ -1,98 +1,100 @@
 """Executable spec for the card-detection stage.
 
-Classic OpenCV: Canny → contours → quadrilateral → perspective warp.
-A synthetic fixture (a white card on a dark mat, various rotations) must
-produce one quad per card and an upright crop of the standard size.
+Detection segments "not the mat": the mat color is the frame's dominant
+color, and anything far enough from it (black borders included) is a card
+candidate. Quads come out ordered TL, TR, BR, BL; landscape quads are tapped
+cards, and `card_views` yields the upright warps worth hashing.
 """
 
 import cv2
 import numpy as np
+from cardgen import CARD_H, CARD_W, fake_card, place
 
-from calabria.vision.detect import ART_WINDOW, crop_art_window, find_card_quads, warp_card
-
-CARD_W, CARD_H = 315, 440  # 63:88 standard MTG card ratio
-
-
-def mat_with_card(angle: float = 0.0, size: tuple[int, int] = (960, 640)) -> np.ndarray:
-    """A dark playmat with one bright card-shaped rectangle, optionally rotated.
-
-    Coordinates are rotated about the image center just like a card would lie
-    on a physically rotated mat. The canvas is sized so no angle clips the card.
-    """
-    img = np.full((size[1], size[0], 3), 35, np.uint8)
-    rect = np.array(
-        [
-            [-CARD_W / 2, -CARD_H / 2],
-            [CARD_W / 2, -CARD_H / 2],
-            [CARD_W / 2, CARD_H / 2],
-            [-CARD_W / 2, CARD_H / 2],
-        ],
-        np.float32,
-    ) + np.float32([size[0] / 2, size[1] / 2])
-    if angle != 0.0:
-        M = cv2.getRotationMatrix2D((size[0] / 2, size[1] / 2), angle, 1.0)
-        rect = cv2.transform(rect.reshape(-1, 1, 2), M).reshape(-1, 2)
-    cv2.fillPoly(img, [rect.astype(np.int32)], (250, 245, 240))
-    return img
+from calabria.vision.detect import card_views, crop_hash_region, find_card_quads, order_corners, warp_card
+from calabria.vision.index import embed_card
+from calabria.vision.phash import hamming
 
 
-def test_finds_upright_card():
-    quads = find_card_quads(mat_with_card())
-    assert len(quads) == 1
-    assert quads[0].shape == (4, 2)
+def area(quad: np.ndarray) -> float:
+    return float(cv2.contourArea(quad.astype(np.float32)))
+
+
+def test_black_bordered_card_on_dark_mat_is_found_whole():
+    frame = place(fake_card(1), height=360)
+    (quad,) = find_card_quads(frame)
+    expected = 360 * 360 * CARD_W / CARD_H
+    assert abs(area(quad) - expected) / expected < 0.08  # the card, not its text box
+
+
+def test_white_bordered_card_still_found():
+    assert len(find_card_quads(place(fake_card(2, border=(240, 240, 235))))) == 1
+
+
+def test_light_mat_works_too():
+    assert len(find_card_quads(place(fake_card(3), mat=(205, 210, 200)))) == 1
 
 
 def test_rotated_card_is_still_one_quad():
-    assert len(find_card_quads(mat_with_card(angle=15.0))) == 1
-    assert len(find_card_quads(mat_with_card(angle=83.0))) == 1
+    for angle in (15.0, -35.0, 83.0):
+        assert len(find_card_quads(place(fake_card(4), angle=angle))) == 1
+
+
+def test_several_cards_found_largest_first():
+    frame = place(fake_card(5), center=(300, 360), height=300)
+    frame = place(fake_card(6), center=(800, 360), height=360, frame=frame)
+    quads = find_card_quads(frame)
+    assert len(quads) == 2
+    assert area(quads[0]) > area(quads[1])
 
 
 def test_empty_mat_finds_nothing():
-    img = np.full((480, 640, 3), 35, np.uint8)
-    assert find_card_quads(img) == []
+    assert find_card_quads(np.full((480, 640, 3), 35, np.uint8)) == []
 
 
 def test_tiny_blobs_ignored():
     img = np.full((480, 640, 3), 35, np.uint8)
-    cv2.fillPoly(img, [np.array([[10, 10], [40, 10], [40, 40], [10, 40]], np.int32)], (250, 245, 240))
+    cv2.rectangle(img, (10, 10), (40, 40), (250, 245, 240), cv2.FILLED)
     assert find_card_quads(img) == []
 
 
+def test_non_card_shapes_ignored():
+    img = np.full((480, 640, 3), 35, np.uint8)
+    cv2.rectangle(img, (50, 100), (600, 160), (250, 245, 240), cv2.FILLED)  # a long strip (dice tray, pen)
+    assert find_card_quads(img) == []
+
+
+def test_order_corners_is_clockwise_from_top_left():
+    pts = np.float32([[300, 50], [100, 60], [110, 400], [310, 390]])  # shuffled
+    tl, tr, br, bl = order_corners(pts)
+    assert tl.tolist() == [100, 60]
+    assert tr.tolist() == [300, 50]
+    assert br.tolist() == [310, 390]
+    assert bl.tolist() == [110, 400]
+
+
 def test_warp_produces_upright_crop():
-    crop = warp_card(mat_with_card(), find_card_quads(mat_with_card())[0])
-    assert crop.shape == (CARD_H, CARD_W, 3)
+    frame = place(fake_card(7))
+    assert warp_card(frame, find_card_quads(frame)[0]).shape == (CARD_H, CARD_W, 3)
 
 
-def test_crop_art_window_returns_central_inset():
-    """The scan flow hashes the art window of a full-card crop, not the border."""
-    art = gradient(320, 224, horizontal=True)
-    card = card_with_art_frame(art)
-    window = crop_art_window(card)
-    assert window.shape == cv2.cvtColor(art, cv2.COLOR_GRAY2BGR).shape
-    # art survives as the exact pixels inside the frame (gray-fold equality)
-    assert np.array_equal(cv2.cvtColor(window, cv2.COLOR_BGR2GRAY), art)
+def test_upright_card_views():
+    card = fake_card(8)
+    frame = place(card, angle=10)
+    views, tapped = card_views(frame, find_card_quads(frame)[0])
+    assert tapped is False
+    assert hamming(embed_card(views[0]), embed_card(card)) <= 40  # of 256 bits
 
 
-def gradient(h: int, w: int, horizontal: bool = True) -> np.ndarray:
-    axis = np.tile(np.linspace(0, 255, w).astype(np.uint8), (h, 1))
-    return axis if horizontal else axis.T
+def test_tapped_card_is_flagged_and_one_view_is_upright():
+    card = fake_card(9)
+    frame = place(card, tapped=True, angle=-5)
+    views, tapped = card_views(frame, find_card_quads(frame)[0])
+    assert tapped is True
+    assert min(hamming(embed_card(v), embed_card(card)) for v in views) <= 40
 
 
-def card_with_art_frame(art: np.ndarray) -> np.ndarray:
-    """A full-card-sized canvas whose art window holds `art` (detect.py geometry)."""
-    art_bgr = cv2.cvtColor(art, cv2.COLOR_GRAY2BGR) if art.ndim == 2 else art
-    ha, wa = art_bgr.shape[:2]
-    x0, y0, x1, y1 = ART_WINDOW
-    h_card = int(ha / (y1 - y0))
-    w_card = int(wa / (x1 - x0))
-    card = np.full((h_card, w_card, 3), 235, np.uint8)
-    card[int(y0 * h_card) : int(y0 * h_card) + ha, int(x0 * w_card) : int(x0 * w_card) + wa] = art_bgr
-    return card
-
-
-def test_warp_is_angle_invariant():
-    """Same card at different rotations should warp to near-identical crops."""
-    crops = [warp_card(mat_with_card(a), find_card_quads(mat_with_card(a))[0]) for a in (0.0, 25.0, -40.0)]
-    hashes = [cv2.cvtColor(c, cv2.COLOR_BGR2GRAY).mean() for c in crops]
-    # Grayscale mean of an identical cropped card must match across a few degrees.
-    assert max(hashes) - min(hashes) <= 6.0
+def test_hash_region_is_card_relative():
+    card = fake_card(10)
+    region = crop_hash_region(card)
+    assert 0.4 * CARD_H < region.shape[0] < 0.6 * CARD_H
+    assert region.shape[1] > 0.8 * CARD_W

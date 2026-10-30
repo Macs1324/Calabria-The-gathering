@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from calabria.api.main import create_app
 from calabria.scryfall.cards import CardMetaStore
-from calabria.scryfall.search import CardSearch, image_url
+from calabria.scryfall.search import CardSearch
 
 CDN = "https://cards.scryfall.io/art_crop/front/{a}/{b}/{id}.jpg?1"
 
@@ -66,12 +66,6 @@ def test_empty_query_returns_nothing():
 
 def test_limit_caps_results():
     assert len(search().query("l", limit=2)) == 2
-
-
-def test_image_url_swaps_cdn_version():
-    art = CDN.format(a="b", b="0", id="b01")
-    assert image_url(art, "normal") == "https://cards.scryfall.io/normal/front/b/0/b01.jpg?1"
-    assert image_url(art, "small") == "https://cards.scryfall.io/small/front/b/0/b01.jpg?1"
 
 
 # --- API -----------------------------------------------------------------------
