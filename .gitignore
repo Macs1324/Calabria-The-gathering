@@ -6,6 +6,12 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# Built card data (bulk snapshot, art cache, indexes) — downloaded artifacts,
+# never commit them. The default depends on the working directory: /data for
+# repo-root runs, /server/data for quickstart runs. Override with CALABRIA_DATA_DIR.
+server/data/
+/data/
+
 # Node
 node_modules/
 dist/

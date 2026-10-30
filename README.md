@@ -50,6 +50,20 @@ pnpm install
 pnpm tauri dev
 ```
 
+## Building the card index
+
+```sh
+cd server
+uv run calabria-build-index                     # full index (~55k crops, resumable)
+uv run calabria-build-index --limit 2000        # capped run for a quick start
+```
+
+Artifacts land in `server/data/` (override with `CALABRIA_DATA_DIR`): the
+unique-artwork JSONL snapshot, a sharded art cache, `cards.db` (names/sets),
+and `card_index.npz` (the retrieval index `/vision/scan` queries). Re-runs
+are cheap: one listing request per refresh, art crops already cached stay on
+disk.
+
 ## Server container
 
 ```sh
@@ -61,9 +75,10 @@ docker run -p 8000:8000 calabria-server
 
 | # | Milestone | Status |
 |---|-----------|--------|
-| 0 | Repo skeleton, toolchain, Dockerfile, docs | ✅ landed |
-| 1 | Vision core: quads → warp → dHash index → top-3 candidates | ✅ (dHash stand-in; Scryfall embedding index next) |
+| 0 | Repo skeleton, toolchain, Dockerfile, docs | ✅ landed (v0.0.1) |
+| 1 | Vision core: quads → warp → dHash index → top-3 candidates | ✅ (dHash stand-in; embedding swap next) |
 | 2 | Server: `/vision/scan` + rooms REST + event log | ✅ |
+| 2.5 | Scryfall index: bulk snapshot, art cache, name-joined candidates, resumable build | ✅ this branch |
 | 3 | App: camera screen, snap → scan → confirm round trip | in progress (shell scaffolded) |
 | 4 | Rooms WS sync, two clients in one room | later |
 | 5 | Auto-tap from card rotation, card-back detection | later |

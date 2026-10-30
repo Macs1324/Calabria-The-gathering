@@ -1,0 +1,28 @@
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "object": "bulk_data",
+      "id": "27bf3214-1271-490b-bdfe-c0be6c23d02e",
+      "type": "oracle_cards",
+      "updated_at": "2026-10-30T09:02:03.583+00:00",
+      "uri": "https://api.scryfall.com/bulk-data/27bf3214-1271-490b-bdfe-c0be6c23d02e",
+      "name": "Oracle Cards",
+      "description": "Oracle card objects.",
+      "compressed_size": 25230171,
+      "jsonl_download_uri": "https://c2.scryfall.com/oracle-cards.jsonl"
+    },
+    {
+      "object": "bulk_data",
+      "id": "6bbcf976-6369-4401-88fc-3a9e4984c305",
+      "type": "unique_artwork",
+      "updated_at": "2026-10-30T09:02:30.509+00:00",
+      "uri": "https://api.scryfall.com/bulk-data/6bbcf976-6369-4401-88fc-3a9e4984c305",
+      "name": "Unique Artwork",
+      "description": "All unique artworks.",
+      "compressed_size": 38815462,
+      "jsonl_download_uri": "https://c2.scryfall.com/unique-artwork.jsonl"
+    }
+  ]
+}

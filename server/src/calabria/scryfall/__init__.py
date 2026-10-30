@@ -1,0 +1,1 @@
+"""Scryfall integration package."""
