@@ -13,10 +13,14 @@ from calabria.api.main import create_app
 
 
 def synthetic_art(h: int, w: int) -> np.ndarray:
-    """A deterministic gradient+stripe pattern standing in for unique card art."""
+    """A deterministic gradient+stripe pattern standing in for unique card art.
+
+    Bright enough (>=130) to survive Otsu against the dark (35) playmat.
+    """
     yy, xx = np.mgrid[0:h, 0:w]
-    v = (xx * 255 // max(w - 1, 1) + (yy * 120 // max(h - 1, 1)) * (xx // 8 % 2)) % 256
-    return v.astype(np.uint8)
+    base = 130 + (xx * 100 // max(w - 1, 1))  # horizontal ramp 130..230
+    stripe = np.where((xx // 8) % 2, 20, 0)  # vertical stripes
+    return np.clip(base + stripe, 0, 255).astype(np.uint8)
 
 
 def card_frame(art: np.ndarray, size: tuple[int, int] = (960, 640)) -> np.ndarray:
@@ -35,6 +39,9 @@ def encode(img: np.ndarray) -> str:
 
 def client() -> TestClient:
     return TestClient(create_app())
+
+
+ART_CARD = (440, 315)  # portrait, like a real MTG card
 
 
 def test_health():
@@ -64,7 +71,7 @@ def test_invalid_event_400_with_message():
 
 
 def test_scan_empty_index_returns_no_candidates():
-    frame = card_frame(synthetic_art(200, 300))
+    frame = card_frame(synthetic_art(*ART_CARD))
     res = client().post("/vision/scan", json={"image": encode(frame)})
     (cards,) = res.json()["cards"]
     assert cards["candidates"] == []
@@ -73,7 +80,7 @@ def test_scan_empty_index_returns_no_candidates():
 
 def test_scan_returns_seeded_match():
     app = create_app()
-    art = synthetic_art(200, 300)
+    art = synthetic_art(*ART_CARD)
     app.state.card_index.add("omu-ingenious", art)
     res = TestClient(app).post("/vision/scan", json={"image": encode(card_frame(art))})
     card = res.json()["cards"][0]

@@ -75,6 +75,6 @@ def order_corners(pts: np.ndarray) -> np.ndarray:
     c = pts.astype(np.float32)
     tl = c[np.argmin(c.sum(axis=1))]
     br = c[np.argmax(c.sum(axis=1))]
-    tr = c[np.argmin(c[:, 0] - c[:, 1])]
-    bl = c[np.argmax(c[:, 0] - c[:, 1])]
+    tr = c[np.argmax(c[:, 0] - c[:, 1])]  # large x, small y
+    bl = c[np.argmin(c[:, 0] - c[:, 1])]  # small x, large y
     return np.array([tl, tr, br, bl], np.float32)
