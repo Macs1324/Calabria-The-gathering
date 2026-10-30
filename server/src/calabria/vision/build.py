@@ -70,7 +70,10 @@ def _index_cached_rows(
 ) -> CardIndex:
     index = CardIndex()
     for row in rows:
-        crop = cv2.imread(str(art_cache_path(cache_dir, row["card_id"])))
+        path = art_cache_path(cache_dir, row["card_id"])
+        if not path.exists():  # not cached yet (e.g. capped build) — stay silent
+            continue
+        crop = cv2.imread(str(path))
         if crop is None:
             continue
         index.add_hash(row["card_id"], embedder.embed(crop))
