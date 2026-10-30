@@ -141,7 +141,8 @@ Live instance: https://calabria-the-gathering.fly.dev
 | 3 | App: camera screen, snap → scan → confirm round trip | ✅ v0.2.0 (web client) |
 | 4 | Rooms WS sync, two clients in one room | ✅ v0.2.0 (+ seats, persistence, undo) |
 | 4.5 | Recognition v2: mat-difference + edge detection, full-card hashing, eval CLI | ✅ v0.2.0 |
-| 5 | Real-photo calibration, auto-tap from card rotation, card-back detection | next |
+| 5 | Hands-free: mat watch (auto-play, tap sync, departures), voice commands, UI polish | ✅ v0.3.0 |
+| 5.5 | Real-photo calibration, card-back detection | next |
 | 6 | Deck registration (cheat-proof scans), matchmaking, Tier-1 rules | later |
 
 Details and working decisions: [docs/architecture.md](docs/architecture.md).
