@@ -1,0 +1,9 @@
+# Build context is the repo root; keep it to sources only.
+.git
+**/node_modules
+**/.venv
+**/__pycache__
+app/dist
+app/src-tauri
+server/data
+data

@@ -7,10 +7,11 @@ anything else drifts out of date.
 
 ```
 +-------------------+        +------------------------------+
-| app (Tauri)       |  HTTPS | server (FastAPI)             |
+| app (browser)     |  HTTPS | server (FastAPI)             |
 |  webcam capture   |  ----> |  /vision/scan  -> candidates |
-|  confirm top-3    |        |  rooms + event-sourced state |
-|  battlefield view |  <---- |  WS (later): live sync       |
+|  confirm / search |        |  /cards/search, card images  |
+|  live table       |  <-WS- |  rooms: seats, event log,    |
+|  (served at /)    |        |  JSON persistence, broadcast |
 +-------------------+        +------------------------------+
                                       |
                                       v
@@ -65,9 +66,28 @@ the next calibration step.
 Event-sourced: `apply(events) -> state`, rooms are a fold over an event log.
 Clients render the log; the log doubles as replay and cheat-forensics. Hand
 privacy is natural: hands are held off-camera, so a card exists for the server
-only once it is scanned into play.
+only once it is scanned into a public zone (battlefield, graveyard, exile,
+command); moving it to hand/library removes it, and tokens that leave the
+battlefield cease to exist.
+
+- **Identity:** joining a room returns a seat token; every action is
+  attributed to the token's seat. Rejoining with the token reclaims the seat,
+  so a dropped connection costs nothing (disconnects are presence, not events).
+- **Undo:** pop your own latest event and refold. Seats can't be undone.
+- **Persistence:** one JSON file per room under `CALABRIA_DATA_DIR/rooms`,
+  rewritten atomically per change. Rooms are tiny; this keeps undo trivial.
+- **Live sync:** every change broadcasts a full view (state, last 200 log
+  events, who's online) to the room's sockets; clients just re-render.
+- **Loose by design:** any seated player may act on any card (removal,
+  steal effects). The log shows who did what.
 
 ## Working decisions (2026-10-30)
+
+- **Browser first.** The client is served by the server; friends open a
+  link. The Tauri shell stays buildable, but WebKitGTK webcams are unreliable
+  and installers mean OS warnings.
+- **Typing is first-class.** Name search (word prefixes, any order, accents
+  folded) is always one keystroke away; the camera pre-fills.
 
 - **Online 1v1 first.** Each player has their own app + webcam; server arbitrates.
 - **Top-3 confirm UI** instead of auto-accept. Model error becomes a tap, not corruption.
