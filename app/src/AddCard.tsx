@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { CardHit, ScanCandidate, Zone, api, cardImage } from "./api";
-import { Camera } from "./Camera";
-import { RoomActions } from "./useRoom";
+import { useEffect, useState } from "react";
+import { CardHit, Zone, api, cardImage } from "./api";
 
-/**
- * Put a card into play. Typing is the first-class path; the camera scan only
- * pre-fills candidates (top-3 to tap), and "none of these" falls back to search.
- */
-export function AddCard({ send }: { send: RoomActions["send"] }) {
+export interface PlayOptions {
+  zone: Zone;
+  token: boolean;
+  tapped: boolean;
+}
+
+/** Type-to-play: always one keystroke away, whatever the camera thinks. */
+export function AddCard({
+  onPlay,
+}: {
+  onPlay: (card: CardHit, opts: PlayOptions) => void;
+}) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<CardHit[]>([]);
   const [hitsFor, setHitsFor] = useState(""); // the query `hits` answer
@@ -15,9 +20,6 @@ export function AddCard({ send }: { send: RoomActions["send"] }) {
   const [zone, setZone] = useState<Zone>("battlefield");
   const [token, setToken] = useState(false);
   const [tapped, setTapped] = useState(false);
-  const [camera, setCamera] = useState(false);
-  const [scanned, setScanned] = useState<ScanCandidate[] | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -43,23 +45,18 @@ export function AddCard({ send }: { send: RoomActions["send"] }) {
     };
   }, [query]);
 
-  const play = (card: { card_id: string; name: string | null }) => {
-    send("card_play", {
-      card_id: card.card_id,
-      name: card.name,
-      zone,
-      token,
-      tapped: tapped && zone === "battlefield",
-    });
+  const play = (card: CardHit) => {
+    onPlay(card, { zone, token, tapped: tapped && zone === "battlefield" });
     setQuery("");
     setHits([]);
-    setScanned(null);
     setToken(false);
   };
 
   return (
     <section className="panel add-card">
-      <h4>Play a card</h4>
+      <div className="panel-head">
+        <h4>Play by name</h4>
+      </div>
       <div className="row options">
         <select
           value={zone}
@@ -88,10 +85,8 @@ export function AddCard({ send }: { send: RoomActions["send"] }) {
           tapped
         </label>
       </div>
-
       <div className="search">
         <input
-          ref={inputRef}
           value={query}
           placeholder="Type a card name… (e.g. light bo)"
           onChange={(e) => setQuery(e.currentTarget.value)}
@@ -135,57 +130,6 @@ export function AddCard({ send }: { send: RoomActions["send"] }) {
           </ul>
         )}
       </div>
-
-      <div className="row">
-        <button
-          className={camera ? "on" : ""}
-          onClick={() => setCamera((c) => !c)}
-        >
-          {camera ? "Hide camera" : "📷 Scan with camera"}
-        </button>
-      </div>
-
-      {camera && <Camera onCandidates={setScanned} />}
-
-      {scanned && (
-        <div className="scan-result">
-          {scanned.length === 0 ? (
-            <p className="muted">
-              No card found. Hold it flat and fill more of the frame, or type
-              its name.
-            </p>
-          ) : (
-            <>
-              <p className="muted">Which one is it?</p>
-              <div className="candidates">
-                {scanned.map((c) => (
-                  <button
-                    key={c.card_id}
-                    className="candidate"
-                    onClick={() => play(c)}
-                    title={c.name ?? c.card_id}
-                  >
-                    <img
-                      src={cardImage(c.card_id, "small")}
-                      alt={c.name ?? ""}
-                    />
-                    <span>{c.name ?? c.card_id}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          <button
-            className="ghost"
-            onClick={() => {
-              setScanned(null);
-              inputRef.current?.focus();
-            }}
-          >
-            None of these — I'll type it
-          </button>
-        </div>
-      )}
     </section>
   );
 }

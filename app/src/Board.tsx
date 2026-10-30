@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { MouseEvent, useEffect, useState } from "react";
 import { CardEntry, GameState, Zone, cardImage } from "./api";
 import { RoomActions } from "./useRoom";
 
@@ -7,7 +7,8 @@ const SIDE_ZONES: [Zone, string][] = [
   ["exile", "Exile"],
   ["command", "Command"],
 ];
-const LIFE_STEPS = [-5, -1, 1, 5];
+
+export type PreviewHandler = (card: CardEntry | null, e?: MouseEvent) => void;
 
 /** One player's side of the table: life, battlefield, and public piles. */
 export function Board({
@@ -26,67 +27,90 @@ export function Board({
   online: boolean;
   selected: number | null;
   onSelect: (seq: number) => void;
-  onPreview: (card: CardEntry | null) => void;
+  onPreview: PreviewHandler;
   send: RoomActions["send"];
 }) {
   const [picked, setOpen] = useState<Zone | null>(null);
   const mine = player === you;
-  // A pile that emptied closes itself (its button is disabled at 0).
-  const open = picked && state[picked].some((c) => c.owner === player) ? picked : null;
+  // A pile that emptied closes itself (its button is disabled at 0)…
+  const open =
+    picked && state[picked].some((c) => c.owner === player) ? picked : null;
   useEffect(() => {
     if (picked && !open) setOpen(null); // …and stays closed when refilled
   }, [picked, open]);
+
   const battlefield = state.battlefield.filter((c) => c.controller === player);
   const active = state.turn.player === player;
+  const lifeTotal = state.life[player];
 
   return (
     <section
-      className={`board ${mine ? "mine" : ""} ${active ? "active" : ""}`}
+      className={`board ${mine ? "mine" : "theirs"} ${active ? "active" : ""}`}
     >
-      <div className="board-head">
+      <header className="board-head">
         <span
-          className={`dot ${online ? "on" : ""}`}
+          className={`avatar ${online ? "on" : ""}`}
           title={online ? "online" : "offline"}
-        />
-        <h3>{mine ? `${player} (you)` : player}</h3>
-        {active && <span className="badge">{mine ? "your turn" : "their turn"}</span>}
-        <div className="life">
-          {you &&
-            LIFE_STEPS.slice(0, 2).map((d) => (
-              <button
-                key={d}
-                onClick={() => send("life_change", { delta: d, player })}
-              >
-                {d}
-              </button>
-            ))}
-          <span className="life-total">{state.life[player] ?? "—"}</span>
-          {you &&
-            LIFE_STEPS.slice(2).map((d) => (
-              <button
-                key={d}
-                onClick={() => send("life_change", { delta: d, player })}
-              >
-                +{d}
-              </button>
-            ))}
+        >
+          {player.slice(0, 1).toUpperCase()}
+        </span>
+        <div className="who">
+          <h3>{mine ? `${player} · you` : player}</h3>
+          <span className="muted small">
+            {active
+              ? mine
+                ? "your turn"
+                : "their turn"
+              : online
+                ? "online"
+                : "offline"}
+          </span>
         </div>
+
         <div className="piles">
           {SIDE_ZONES.map(([zone, label]) => {
             const count = state[zone].filter((c) => c.owner === player).length;
             return (
               <button
                 key={zone}
-                className={open === zone ? "on" : ""}
+                className={`pile ${open === zone ? "on" : ""}`}
                 disabled={count === 0}
                 onClick={() => setOpen(open === zone ? null : zone)}
               >
-                {label} {count}
+                {label} <b>{count}</b>
               </button>
             );
           })}
         </div>
-      </div>
+
+        <div
+          className={`life ${lifeTotal !== undefined && lifeTotal <= 5 ? "low" : ""}`}
+        >
+          {you && (
+            <button
+              className="life-btn"
+              onClick={(e) =>
+                send("life_change", { delta: e.shiftKey ? -5 : -1, player })
+              }
+              title="−1 (shift-click: −5)"
+            >
+              −
+            </button>
+          )}
+          <span className="life-total">{lifeTotal ?? "—"}</span>
+          {you && (
+            <button
+              className="life-btn"
+              onClick={(e) =>
+                send("life_change", { delta: e.shiftKey ? 5 : 1, player })
+              }
+              title="+1 (shift-click: +5)"
+            >
+              +
+            </button>
+          )}
+        </div>
+      </header>
 
       {open && (
         <div className="pile-open">
@@ -107,10 +131,10 @@ export function Board({
 
       <div className="battlefield">
         {battlefield.length === 0 && (
-          <p className="muted empty">
+          <p className="empty muted">
             {mine
-              ? "Play a card from the panel on the right →"
-              : "Empty battlefield"}
+              ? "Lay a card on your mat, say “play Sol Ring”, or type a name →"
+              : "Nothing in play yet"}
           </p>
         )}
         {battlefield.map((c) => (
@@ -146,19 +170,20 @@ function CardTile({
   selected: boolean;
   onSelect?: (seq: number) => void;
   onToggleTap?: () => void;
-  onPreview: (card: CardEntry | null) => void;
+  onPreview: PreviewHandler;
 }) {
   const counters = Object.entries(card.counters);
   return (
     <div
       className={`card ${small ? "small" : ""} ${card.tapped ? "tapped" : ""} ${selected ? "selected" : ""}`}
-      title={`${card.name ?? card.card_id}${card.owner !== card.controller ? ` (owned by ${card.owner})` : ""}`}
       onClick={(e) => {
         if (e.detail > 1) return; // second click of a double-click taps, not deselects
         onSelect?.(card.entry_seq);
       }}
       onDoubleClick={onToggleTap}
-      onMouseEnter={() => onPreview(card)}
+      onMouseEnter={(e) => onPreview(card, e)}
+      onMouseMove={(e) => onPreview(card, e)}
+      onMouseLeave={() => onPreview(null)}
     >
       <img
         src={cardImage(card.card_id)}
@@ -167,6 +192,9 @@ function CardTile({
         draggable={false}
       />
       {card.token && <span className="token-tag">token</span>}
+      {card.owner !== card.controller && (
+        <span className="token-tag stolen">{card.owner}'s</span>
+      )}
       {counters.length > 0 && (
         <div className="counters">
           {counters.map(([kind, n]) => (
