@@ -144,7 +144,7 @@ function RoomGate({ code, onLeave }: { code: string; onLeave: () => void }) {
               />
             </label>
             {gate.error && <p className="error">{gate.error}</p>}
-            <div className="row">
+            <div className="gate-actions">
               <button
                 className="primary"
                 type="submit"

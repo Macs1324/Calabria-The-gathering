@@ -1,5 +1,7 @@
-import { MouseEvent, useEffect, useState } from "react";
+import { CSSProperties, MouseEvent, useEffect, useState } from "react";
 import { CardEntry, GameState, Zone, cardImage } from "./api";
+import { Icon } from "./Icon";
+import { seatColor } from "./seats";
 import { RoomActions } from "./useRoom";
 
 const SIDE_ZONES: [Zone, string][] = [
@@ -42,42 +44,56 @@ export function Board({
   const battlefield = state.battlefield.filter((c) => c.controller === player);
   const active = state.turn.player === player;
   const lifeTotal = state.life[player];
+  const seat = { "--seat": seatColor(state.players, player) } as CSSProperties;
 
   return (
     <section
       className={`board ${mine ? "mine" : "theirs"} ${active ? "active" : ""}`}
+      style={seat}
     >
       <header className="board-head">
-        <span
-          className={`avatar ${online ? "on" : ""}`}
-          title={online ? "online" : "offline"}
-        >
+        <span className="avatar">
           {player.slice(0, 1).toUpperCase()}
+          <span
+            className={`presence ${online ? "on" : ""}`}
+            title={online ? "online" : "offline"}
+          />
         </span>
         <div className="who">
-          <h3>{mine ? `${player} · you` : player}</h3>
-          <span className="muted small">
+          <h3>
+            {player}
+            {mine && <span className="you-tag">you</span>}
+          </h3>
+          <span className="status">
             {active
               ? mine
-                ? "your turn"
-                : "their turn"
+                ? "Your turn"
+                : "Taking their turn"
               : online
-                ? "online"
-                : "offline"}
+                ? "Online"
+                : "Offline"}
           </span>
         </div>
 
         <div className="piles">
           {SIDE_ZONES.map(([zone, label]) => {
-            const count = state[zone].filter((c) => c.owner === player).length;
+            const cards = state[zone].filter((c) => c.owner === player);
+            const top = cards[cards.length - 1];
             return (
               <button
                 key={zone}
                 className={`pile ${open === zone ? "on" : ""}`}
-                disabled={count === 0}
+                disabled={cards.length === 0}
+                aria-label={`${label}: ${cards.length}`}
                 onClick={() => setOpen(open === zone ? null : zone)}
               >
-                {label} <b>{count}</b>
+                <span className="pile-face">
+                  {top && (
+                    <img src={cardImage(top.card_id, "small")} alt="" />
+                  )}
+                  {cards.length > 0 && <b>{cards.length}</b>}
+                </span>
+                <span className="pile-label">{label}</span>
               </button>
             );
           })}
@@ -89,24 +105,26 @@ export function Board({
           {you && (
             <button
               className="life-btn"
+              aria-label={`${player} loses 1 life`}
               onClick={(e) =>
                 send("life_change", { delta: e.shiftKey ? -5 : -1, player })
               }
               title="−1 (shift-click: −5)"
             >
-              −
+              <Icon name="minus" size={16} />
             </button>
           )}
           <span className="life-total">{lifeTotal ?? "—"}</span>
           {you && (
             <button
               className="life-btn"
+              aria-label={`${player} gains 1 life`}
               onClick={(e) =>
                 send("life_change", { delta: e.shiftKey ? 5 : 1, player })
               }
               title="+1 (shift-click: +5)"
             >
-              +
+              <Icon name="plus" size={16} />
             </button>
           )}
         </div>
@@ -130,13 +148,18 @@ export function Board({
       )}
 
       <div className="battlefield">
-        {battlefield.length === 0 && (
-          <p className="empty muted">
-            {mine
-              ? "Lay a card on your mat, say “play Sol Ring”, or type a name →"
-              : "Nothing in play yet"}
-          </p>
-        )}
+        {battlefield.length === 0 &&
+          (mine ? (
+            <div className="empty">
+              <span className="ghost-card" />
+              <p>
+                Lay a card on your mat, say <q>play Sol Ring</q>, or search for
+                it on the right.
+              </p>
+            </div>
+          ) : (
+            <p className="empty muted">No permanents</p>
+          ))}
         {battlefield.map((c) => (
           <CardTile
             key={c.entry_seq}
@@ -199,7 +222,7 @@ function CardTile({
         <div className="counters">
           {counters.map(([kind, n]) => (
             <span key={kind}>
-              {n}× {kind}
+              {kind} <b>×{n}</b>
             </span>
           ))}
         </div>
