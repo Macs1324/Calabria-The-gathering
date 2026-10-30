@@ -7,6 +7,7 @@ import base64
 
 import cv2
 import numpy as np
+from cardgen import fake_card, place
 from fastapi.testclient import TestClient
 
 from calabria.api.main import create_app
@@ -50,24 +51,30 @@ def test_health():
 
 def test_unknown_room_404():
     assert client().get("/rooms/nope").status_code == 404
-    assert client().post("/rooms/nope/events", json={"type": "card_play", "actor": "al"}).status_code == 404
+    assert client().post("/rooms/nope/events", json={"type": "card_play"}).status_code == 404
+    assert client().post("/rooms/nope/join", json={"name": "al"}).status_code == 404
 
 
 def test_room_play_round_trip():
     c = client()
     room_id = c.post("/rooms").json()["room_id"]
-    c.post(f"/rooms/{room_id}/events", json={"type": "player_join", "actor": "al"})
-    c.post(f"/rooms/{room_id}/events", json={"type": "card_play", "actor": "al", "payload": {"card_id": "isle"}})
+    token = c.post(f"/rooms/{room_id}/join", json={"name": "al"}).json()["token"]
+    c.post(f"/rooms/{room_id}/events", headers={"X-Seat-Token": token}, json={"type": "card_play", "payload": {"card_id": "isle"}})
     snap = c.get(f"/rooms/{room_id}").json()
-    assert snap["battlefield"] == [{"card_id": "isle", "controller": "al", "entry_seq": 1, "tapped": False}]
+    (entry,) = snap["battlefield"]
+    assert entry["card_id"] == "isle"
+    assert entry["controller"] == "al"
+    assert entry["entry_seq"] == 1
+    assert entry["tapped"] is False
 
 
 def test_invalid_event_400_with_message():
     c = client()
     room_id = c.post("/rooms").json()["room_id"]
-    res = c.post(f"/rooms/{room_id}/events", json={"type": "card_play", "actor": "ghost", "payload": {"card_id": "x"}})
+    token = c.post(f"/rooms/{room_id}/join", json={"name": "al"}).json()["token"]
+    res = c.post(f"/rooms/{room_id}/events", headers={"X-Seat-Token": token}, json={"type": "card_tap", "payload": {"entry": 7, "tapped": True}})
     assert res.status_code == 400
-    assert "not seated" in res.json()["detail"]
+    assert "no battlefield entry" in res.json()["detail"]
 
 
 def test_scan_empty_index_returns_no_candidates():
@@ -78,15 +85,49 @@ def test_scan_empty_index_returns_no_candidates():
     assert cards["best"] is None
 
 
-def test_scan_returns_seeded_match():
+def seeded_app(names: dict[str, str] | None = None):
+    """An app whose index holds fake_card(0..19) as card-0..card-19."""
     app = create_app()
-    art = synthetic_art(*ART_CARD)
-    app.state.card_index.add("omu-ingenious", art)
-    res = TestClient(app).post("/vision/scan", json={"image": encode(card_frame(art))})
+    for seed in range(20):
+        app.state.card_index.add(f"card-{seed}", fake_card(seed))
+    rows = [{"card_id": cid, "name": name, "set_code": "tst", "art_crop_uri": "u"} for cid, name in (names or {}).items()]
+    app.state.meta_store.upsert_many(rows)
+    return app
+
+
+def test_scan_returns_seeded_match():
+    res = TestClient(seeded_app()).post("/vision/scan", json={"image": encode(place(fake_card(4), angle=8))})
     card = res.json()["cards"][0]
-    assert card["best"]["card_id"] == "omu-ingenious"
-    assert card["best"]["distance"] <= 24
+    assert card["best"]["card_id"] == "card-4"
+    assert card["best"]["distance"] <= 40
+    assert card["tapped"] is False
     assert len(card["quad"]) == 4
+
+
+def test_scan_recognizes_tapped_card():
+    res = TestClient(seeded_app()).post("/vision/scan", json={"image": encode(place(fake_card(6), tapped=True))})
+    card = res.json()["cards"][0]
+    assert card["tapped"] is True
+    assert card["best"]["card_id"] == "card-6"
+
+
+def test_scan_single_mode_returns_largest_card_only():
+    frame = place(fake_card(1), center=(300, 360), height=250)
+    frame = place(fake_card(2), center=(850, 360), height=400, frame=frame)
+    c = TestClient(seeded_app())
+    assert len(c.post("/vision/scan", json={"image": encode(frame)}).json()["cards"]) == 2
+    (card,) = c.post("/vision/scan", json={"image": encode(frame), "mode": "single"}).json()["cards"]
+    assert card["best"]["card_id"] == "card-2"
+
+
+def test_scan_candidates_are_distinct_names():
+    # two arts of the same card must not crowd out a third option
+    names = {f"card-{i}": f"Card {i}" for i in range(20)}
+    names["card-11"] = "Card 4"
+    res = TestClient(seeded_app(names)).post("/vision/scan", json={"image": encode(place(fake_card(4)))})
+    candidates = res.json()["cards"][0]["candidates"]
+    assert len(candidates) == 3
+    assert len({c["name"] for c in candidates}) == 3
 
 
 def test_scan_frame_without_cards_is_empty():
@@ -97,3 +138,23 @@ def test_scan_frame_without_cards_is_empty():
 def test_scan_rejects_garbage_image():
     res = client().post("/vision/scan", json={"image": base64.b64encode(b"not an image").decode()})
     assert res.status_code == 400
+
+
+# --- static web client ---------------------------------------------------------
+
+
+def test_serves_web_client_when_built(tmp_path):
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("<!doctype html><title>Calabria: The Gathering</title>")
+    (web / "assets" / "app.js").write_text("console.log('hi')")
+    c = TestClient(create_app(web_dir=web))
+    assert "Calabria: The Gathering" in c.get("/").text
+    assert c.get("/assets/app.js").status_code == 200
+    assert c.get("/health").json() == {"status": "ok"}  # API routes still win
+
+
+def test_no_web_client_is_fine(tmp_path):
+    c = TestClient(create_app(web_dir=tmp_path / "missing"))
+    assert c.get("/").status_code == 404
+    assert c.get("/health").status_code == 200
