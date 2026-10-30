@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Nix (flake.lock is committed; these are build artifacts)
+result
+result-*
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
