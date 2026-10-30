@@ -13,10 +13,10 @@
   outputs =
     { nixpkgs, ... }:
     let
+      # NOTE: x86_64-darwin was dropped by nixpkgs 26.11
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
@@ -39,7 +39,7 @@
             pkgs.rust-analyzer
             pkgs.cargo-tauri
           ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             # Linux GUI stack Tauri links against (WebKitGTK 4.1 & friends)
             pkgs.pkg-config
             pkgs.glib
@@ -49,13 +49,13 @@
             pkgs.pango
             pkgs.cairo
             pkgs.librsvg
-            pkgs.libxdo
+            pkgs.xdotool # provides libxdo, used by Tauri window interactions
             pkgs.libayatana-appindicator
             pkgs.dbus
             pkgs.libGL
           ];
           env = { }
-            // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" [
                 pkgs.glib.dev
                 pkgs.gtk3.dev
