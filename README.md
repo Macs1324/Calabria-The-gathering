@@ -117,14 +117,18 @@ fly apps create calabria-the-gathering         # or pick another name, and chang
 fly volumes create calabria_data --size 1 --region ams --yes
 fly deploy                                     # builds remotely; no local Docker needed
 
-# card data: build it locally (see above), then upload the two runtime files (~15 MB)
+# card data: build it locally (see above), then upload the two runtime files (~15 MB).
+# The first boot creates an empty cards.db; sftp won't overwrite it, so remove it first.
+fly ssh console -C "rm -f /data/cards.db /data/cards.db-wal /data/cards.db-shm /data/card_index.npz"
 fly ssh sftp put server/data/card_index.npz /data/card_index.npz
 fly ssh sftp put server/data/cards.db /data/cards.db
 fly machine restart                            # reload the index
 ```
 
 Later updates are just `fly deploy`; the volume (index and rooms) is kept.
-After a card-index rebuild, upload the two files again and restart.
+After a card-index rebuild, repeat the rm / put / restart steps.
+
+Live instance: https://calabria-the-gathering.fly.dev
 
 ## Roadmap
 
