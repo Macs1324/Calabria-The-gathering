@@ -104,3 +104,23 @@ def test_hash_region_is_card_relative():
     region = crop_hash_region(card)
     assert 0.4 * CARD_H < region.shape[0] < 0.6 * CARD_H
     assert region.shape[1] > 0.8 * CARD_W
+
+
+def busy_mat(seed: int = 0, size: tuple[int, int] = (1280, 720)) -> np.ndarray:
+    """An illustrated-playmat stand-in: strong low-frequency color blotches."""
+    rng = np.random.default_rng(seed)
+    blotches = rng.integers(10, 140, (6, 10, 3)).astype(np.uint8)
+    return cv2.resize(blotches, size, interpolation=cv2.INTER_CUBIC)
+
+
+def test_card_on_busy_mat_is_found():
+    frame = place(fake_card(11), frame=busy_mat(), angle=6)
+    (quad,) = find_card_quads(frame)
+    expected = 360 * 360 * CARD_W / CARD_H
+    assert abs(area(quad) - expected) / expected < 0.1
+
+
+def test_detection_paths_do_not_double_count():
+    """Color and edge candidates for the same card collapse into one quad."""
+    frame = place(fake_card(12), mat=(150, 60, 40))
+    assert len(find_card_quads(frame)) == 1
