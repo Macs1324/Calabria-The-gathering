@@ -25,12 +25,20 @@ import { Board } from "./Board";
 import { ConfirmTray } from "./ConfirmTray";
 import { Log } from "./Log";
 import { MatCamera } from "./MatCamera";
+import { Icon } from "./Icon";
+import { Dialog, Menu } from "./Menu";
+import { seatColor } from "./seats";
 import { Plan } from "./matWatch";
 import { Command } from "./voice";
 import { VoiceControl } from "./VoiceControl";
 import { RoomActions, useRoom } from "./useRoom";
 
-const PHASES = ["main", "combat", "main 2", "end"];
+const PHASES: [string, string][] = [
+  ["main", "Main"],
+  ["combat", "Combat"],
+  ["main 2", "Main 2"],
+  ["end", "End"],
+];
 const CAMERA_KEY = "calabria.cameraOn";
 const FEED_MS = 6000;
 
@@ -68,6 +76,7 @@ export function Table({
   const [candidates, setCandidates] = useState<ScanCandidate[] | null>(null);
   const [left, setLeft] = useState<CardEntry[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [newGame, setNewGame] = useState(false);
   const scanRef = useRef<(() => void) | null>(null);
 
   const you = view?.you ?? null;
@@ -238,91 +247,123 @@ export function Table({
   return (
     <div className="table">
       <header className="topbar">
-        <img className="sigil" src="/sigil.png" alt="" />
-        <button className="room-code" title="Copy invite link" onClick={invite}>
-          {copied ? "Link copied" : code}
-        </button>
-        <span
-          className={`conn ${status}`}
-          title={status === "open" ? "Connected" : "Reconnecting…"}
-        />
-
-        <div className={`turn-pill ${yourTurn ? "yours" : ""}`}>
-          <span className="turn-no">T{state.turn.number}</span>
-          <span>
-            {yourTurn ? "Your turn" : `${state.turn.player ?? "—"}'s turn`}
-          </span>
+        <div className="bar-left">
+          <img className="sigil" src="/sigil.png" alt="" />
+          <button
+            className="room-code"
+            data-tip={copied ? undefined : "Copy invite link"}
+            onClick={invite}
+          >
+            <span
+              className={`conn ${status}`}
+              title={status === "open" ? "Connected" : "Reconnecting…"}
+            />
+            <span>{copied ? "Copied" : code}</span>
+            <Icon name={copied ? "check" : "link"} size={14} />
+          </button>
         </div>
-        {you && (
-          <div className="phases">
-            {PHASES.map((p) => (
+
+        <div className="bar-center">
+          <div className={`turn-pill ${yourTurn ? "yours" : ""}`}>
+            <span className="turn-no">Turn {state.turn.number}</span>
+            <span
+              className="turn-who"
+              style={
+                yourTurn
+                  ? undefined
+                  : { color: seatColor(state.players, state.turn.player) }
+              }
+            >
+              {yourTurn ? "Your turn" : `${state.turn.player ?? "—"}'s turn`}
+            </span>
+          </div>
+          <nav className="phases" aria-label="Phase">
+            {PHASES.map(([p, label]) => (
               <button
                 key={p}
-                className={state.phase === p ? "on" : ""}
+                aria-pressed={state.phase === p}
+                disabled={!you}
                 onClick={() => send("phase_set", { phase: p })}
               >
-                {p}
+                {label}
               </button>
             ))}
-          </div>
-        )}
-        {state.last_roll && (
-          <span className="roll">
-            🎲 {state.last_roll.player}:{" "}
-            <strong>{state.last_roll.result}</strong>
-            <span className="muted"> /d{state.last_roll.sides}</span>
-          </span>
-        )}
+          </nav>
+          {state.last_roll && (
+            <span className="roll" title={`Last roll: d${state.last_roll.sides}`}>
+              <Icon name="dice" size={15} />
+              <span
+                style={{ color: seatColor(state.players, state.last_roll.player) }}
+              >
+                {state.last_roll.player}
+              </span>
+              <strong>{state.last_roll.result}</strong>
+              <span className="muted">d{state.last_roll.sides}</span>
+            </span>
+          )}
+        </div>
 
-        <div className="spacer" />
-
-        {you && (
-          <>
-            <VoiceControl
-              ctx={{ you, players: state.players }}
-              onCommand={onCommand}
-            />
-            <div className="tool-group">
+        <div className="bar-right">
+          {you && (
+            <>
+              <VoiceControl
+                ctx={{ you, players: state.players }}
+                onCommand={onCommand}
+              />
+              <span className="bar-sep" />
               <button
+                className="icon-btn"
+                aria-label="Undo"
+                data-tip="Undo · Ctrl+Z"
                 onClick={undo}
-                title="Undo your last action (Ctrl+Z, or say “undo”)"
               >
-                ↶ Undo
+                <Icon name="undo" />
               </button>
               <button
+                className="icon-btn"
+                aria-label="Untap all"
+                data-tip="Untap all"
                 onClick={() => send("untap_all")}
-                title="Untap your permanents"
               >
-                ⟳ Untap
+                <Icon name="untap" />
               </button>
-              <button
-                onClick={() => send("dice_roll", { sides: 20 })}
-                title="Roll a d20"
-              >
-                d20
-              </button>
-              <button
-                onClick={() => send("dice_roll", { sides: 6 })}
-                title="Roll a d6"
-              >
-                d6
-              </button>
-            </div>
-            <NewGame players={state.players} send={send} />
-          </>
-        )}
-        <button className="ghost" onClick={onLeave}>
-          Leave
-        </button>
-        {you && (
-          <button
-            className="end-turn primary"
-            onClick={() => send("turn_end")}
-            title="Pass the turn (or say “end turn”)"
-          >
-            End turn ➜
-          </button>
-        )}
+            </>
+          )}
+          <Menu
+            label="More"
+            items={[
+              ...(you
+                ? [
+                    {
+                      label: "Roll a d20",
+                      icon: "dice" as const,
+                      onSelect: () => send("dice_roll", { sides: 20 }),
+                    },
+                    {
+                      label: "Roll a d6",
+                      icon: "dice" as const,
+                      onSelect: () => send("dice_roll", { sides: 6 }),
+                    },
+                    {
+                      label: "New game…",
+                      icon: "shuffle" as const,
+                      onSelect: () => setNewGame(true),
+                    },
+                  ]
+                : []),
+              { label: "Leave table", icon: "leave", onSelect: onLeave },
+            ]}
+          />
+          {you && (
+            <button
+              className="end-turn primary"
+              onClick={() => send("turn_end")}
+              title="Pass the turn (or say “end turn”)"
+            >
+              End turn <Icon name="arrowRight" size={16} />
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="play">
@@ -426,6 +467,13 @@ export function Table({
         )}
       </div>
 
+      {newGame && you && (
+        <NewGame
+          players={state.players}
+          send={send}
+          onClose={() => setNewGame(false)}
+        />
+      )}
       {zoom && <Zoom {...zoom} />}
       {error && (
         <div className="toast" onClick={clearError}>
@@ -571,52 +619,54 @@ function SelectedBar({
 function NewGame({
   players,
   send,
+  onClose,
 }: {
   players: string[];
   send: RoomActions["send"];
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [life, setLife] = useState(20);
   const [first, setFirst] = useState(players[0] ?? "");
-  if (!open)
-    return (
-      <button className="ghost" onClick={() => setOpen(true)}>
-        New game…
-      </button>
-    );
   return (
-    <span className="new-game">
-      <select
-        value={life}
-        onChange={(e) => setLife(Number(e.currentTarget.value))}
-      >
-        <option value={20}>20 life</option>
-        <option value={30}>30 life</option>
-        <option value={40}>40 life</option>
-      </select>
-      <select value={first} onChange={(e) => setFirst(e.currentTarget.value)}>
-        {players.map((p) => (
-          <option key={p} value={p}>
-            {p} starts
-          </option>
-        ))}
-      </select>
-      <button
-        className="danger"
-        onClick={() => {
-          send("game_reset", {
-            starting_life: life,
-            first: first || players[0],
-          });
-          setOpen(false);
-        }}
-      >
-        Wipe board &amp; start
-      </button>
-      <button className="ghost" onClick={() => setOpen(false)}>
-        Cancel
-      </button>
-    </span>
+    <Dialog title="New game" onClose={onClose}>
+      <p className="muted">
+        Clears every battlefield and pile, and resets life totals.
+      </p>
+      <div className="field">
+        <span>Starting life</span>
+        <div className="segmented">
+          {[20, 30, 40].map((n) => (
+            <button key={n} aria-pressed={life === n} onClick={() => setLife(n)}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span>Who starts</span>
+        <div className="segmented">
+          {players.map((p) => (
+            <button key={p} aria-pressed={first === p} onClick={() => setFirst(p)}>
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="dialog-actions">
+        <button className="ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="danger"
+          onClick={() => {
+            send("game_reset", { starting_life: life, first: first || players[0] });
+            onClose();
+          }}
+        >
+          Wipe the table &amp; start
+        </button>
+      </div>
+    </Dialog>
   );
 }
 
