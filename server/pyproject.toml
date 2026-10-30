@@ -1,6 +1,6 @@
 [project]
 name = "calabria"
-version = "0.1.0"
+version = "0.2.0"
 description = "Camera-driven MTG dueling server: card recognition and game coordination"
 requires-python = ">=3.12"
 dependencies = [
