@@ -1,12 +1,18 @@
 """Locate playing cards in a frame and warp them into upright crops.
 
-Stage 1 detector, still training-free: a playmat is (mostly) one color, so a
-card is whatever is far enough from it. The mat color is the frame's median
-in Lab space; the threshold rides on the mat's own noise (median + k * MAD),
-so black-bordered cards on dark mats still separate. Bright-blob (Otsu)
-detection locked onto the light *text box* of black-bordered cards, which is
-why it was replaced. Heavily illustrated playmats remain a known weak spot
-(see docs/architecture.md); the confirm/search UI absorbs misses.
+Stage 1 detector, still training-free, with two candidate passes:
+
+1. Color: a playmat is (mostly) one color, so a card is whatever is far
+   enough from it. The mat color is the frame's median in Lab space; the
+   threshold rides on the mat's own noise (median + k * MAD), so
+   black-bordered cards on dark mats still separate.
+2. Edges: on illustrated/blotchy mats a single mat color is wrong, but the
+   card outline is still a strong edge. Canny -> close -> fill.
+
+Candidates from both passes go through the same shape checks; overlapping
+duplicates collapse. (Bright-blob Otsu detection, used before, locked onto
+the light *text box* of black-bordered cards.) Misses fall back to the
+confirm/search UI.
 
 Crops are 63:88 (standard MTG card aspect); the fixed output size keeps
 hashes comparable across frames. Landscape quads are tapped cards.
@@ -42,6 +48,19 @@ def find_card_quads(
     Each quad is a (4, 2) float array ordered TL, TR, BR, BL.
     """
     h, w = img.shape[:2]
+    min_area = min_area_ratio * h * w
+    candidates = _quads_in(_color_blob(img), min_area) + _quads_in(_edge_blob(img), min_area)
+    candidates.sort(key=cv2.contourArea, reverse=True)
+    # Largest first; drop anything mostly inside a kept quad: the same card
+    # seen by both passes, or a card's own text box (it is card-shaped too).
+    quads: list[np.ndarray] = []
+    for quad in candidates:
+        if not any(_overlap(quad, kept) > 0.5 for kept in quads):
+            quads.append(quad)
+    return quads[:max_cards]
+
+
+def _color_blob(img: np.ndarray) -> np.ndarray:
     lab = cv2.cvtColor(cv2.GaussianBlur(img, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.int16)
     mat = np.median(lab.reshape(-1, 3), axis=0)
     dist = np.abs(lab - mat).max(axis=2).astype(np.uint8)
@@ -49,14 +68,29 @@ def find_card_quads(
     mad = float(np.median(np.abs(dist.astype(np.float32) - med))) + 1.0
     _, blob = cv2.threshold(dist, max(med + _NOISE_K * mad, _MIN_DIST), 255, cv2.THRESH_BINARY)
     blob = cv2.morphologyEx(blob, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
-    blob = cv2.morphologyEx(blob, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    return _filled(cv2.morphologyEx(blob, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)))
 
-    # Fill each blob so dark art or mat-colored patches inside a card don't
-    # punch holes that break its outline.
+
+def _edge_blob(img: np.ndarray) -> np.ndarray:
+    gray = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+    edges = cv2.dilate(cv2.Canny(gray, 40, 120), np.ones((3, 3), np.uint8))
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    # The open strips filled card interiors' stray edge spurs off the outline.
+    return cv2.morphologyEx(_filled(edges), cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
+
+
+def _filled(mask: np.ndarray) -> np.ndarray:
+    """Fill each blob so dark art or mat-colored patches inside a card don't
+    punch holes that break its outline."""
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    out = np.zeros_like(mask)
+    cv2.drawContours(out, contours, -1, 255, cv2.FILLED)
+    return out
+
+
+def _quads_in(blob: np.ndarray, min_area: float) -> list[np.ndarray]:
     contours, _ = cv2.findContours(blob, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_area = min_area_ratio * h * w
-
-    quads: list[np.ndarray] = []
+    quads = []
     for contour in contours:
         area = cv2.contourArea(contour)
         if area < min_area:
@@ -67,12 +101,15 @@ def find_card_quads(
         quad = _quad_from_hull(hull)
         (_, _), (rw, rh), _ = cv2.minAreaRect(quad)
         aspect = max(rw, rh) / max(min(rw, rh), 1.0)
-        if not _ASPECT[0] <= aspect <= _ASPECT[1]:
-            continue
-        quads.append(order_corners(quad))
+        if _ASPECT[0] <= aspect <= _ASPECT[1]:
+            quads.append(order_corners(quad))
+    return quads
 
-    quads.sort(key=cv2.contourArea, reverse=True)
-    return quads[:max_cards]
+
+def _overlap(a: np.ndarray, b: np.ndarray) -> float:
+    """Intersection over the smaller quad's area (both convex)."""
+    inter, _ = cv2.intersectConvexConvex(a.astype(np.float32), b.astype(np.float32))
+    return float(inter) / max(min(cv2.contourArea(a), cv2.contourArea(b)), 1.0)
 
 
 def _quad_from_hull(hull: np.ndarray) -> np.ndarray:

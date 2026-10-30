@@ -117,7 +117,10 @@ def test_card_on_busy_mat_is_found():
     frame = place(fake_card(11), frame=busy_mat(), angle=6)
     (quad,) = find_card_quads(frame)
     expected = 360 * 360 * CARD_W / CARD_H
-    assert abs(area(quad) - expected) / expected < 0.1
+    # The black border can melt into a dark busy mat; then the edge pass finds
+    # the inner frame (~86% of the card), which the matcher tolerates. The
+    # text box (~30%) is what must never win.
+    assert 0.8 < area(quad) / expected < 1.1
 
 
 def test_detection_paths_do_not_double_count():

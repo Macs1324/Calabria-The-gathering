@@ -33,8 +33,8 @@ from calabria.scryfall.cards import CardMetaStore
 from calabria.scryfall.images import IMAGE_VERSIONS, image_url
 from calabria.scryfall.search import CardSearch
 from calabria.vision.build import load_persisted_index
-from calabria.vision.detect import card_views, find_card_quads
-from calabria.vision.index import CardIndex, embed_card
+from calabria.vision.index import CardIndex
+from calabria.vision.scan import scan_frame
 
 
 class ScanRequest(BaseModel):
@@ -42,10 +42,6 @@ class ScanRequest(BaseModel):
     mode: Literal["all", "single"] = Field(
         default="all", description="'single': only the largest card (hold-it-up-to-the-camera scans)"
     )
-
-
-CANDIDATES = 3
-_SEARCH_DEPTH = 12  # nearest arts searched to find CANDIDATES distinct names
 
 
 class RoomEvent(BaseModel):
@@ -97,26 +93,7 @@ def _mount_routes(app: FastAPI) -> None:
     @app.post("/vision/scan")
     def scan(req: ScanRequest) -> dict[str, Any]:
         frame = _decode_image(req.image)
-        quads = find_card_quads(frame)
-        if req.mode == "single":
-            quads = quads[:1]
-        cards = []
-        for quad in quads:
-            views, tapped = card_views(frame, quad)
-            # Upright vs upside down (or tapped left vs right): keep the closer view.
-            hits = min(
-                (app.state.card_index.search(embed_card(view), k=_SEARCH_DEPTH) for view in views),
-                key=lambda found: found[0][1] if found else 1 << 30,
-            )
-            candidates = _distinct_names([_describe(app, cid, dist) for cid, dist in hits])[:CANDIDATES]
-            cards.append(
-                {
-                    "quad": np.asarray(quad).round(1).tolist(),
-                    "tapped": tapped,
-                    "candidates": candidates,
-                    "best": candidates[0] if candidates else None,
-                }
-            )
+        cards = scan_frame(frame, app.state.card_index, app.state.meta_store.get, single=req.mode == "single")
         return {"cards": cards}
 
     @app.get("/cards/search")
@@ -268,28 +245,6 @@ def _guard(action: Any) -> Any:
         raise HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-def _distinct_names(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep the closest art per card name (unknown names stay distinct)."""
-    seen: set[str] = set()
-    out = []
-    for c in candidates:
-        key = c["name"] or c["card_id"]
-        if key not in seen:
-            seen.add(key)
-            out.append(c)
-    return out
-
-
-def _describe(app: FastAPI, card_id: str, distance: int) -> dict[str, Any]:
-    meta = app.state.meta_store.get(card_id)
-    return {
-        "card_id": card_id,
-        "distance": distance,
-        "name": meta["name"] if meta else None,
-        "set_code": meta["set_code"] if meta else None,
-    }
 
 
 def _room(app: FastAPI, room_id: str) -> Room:
