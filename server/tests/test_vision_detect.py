@@ -7,29 +7,28 @@ produce one quad per card and an upright crop of the standard size.
 
 import cv2
 import numpy as np
-import pytest
 
 from calabria.vision.detect import find_card_quads, warp_card
 
 CARD_W, CARD_H = 315, 440  # 63:88 standard MTG card ratio
 
 
-def mat_with_card(angle: float = 0.0, size: tuple[int, int] = (640, 480)) -> np.ndarray:
+def mat_with_card(angle: float = 0.0, size: tuple[int, int] = (960, 640)) -> np.ndarray:
     """A dark playmat with one bright card-shaped rectangle, optionally rotated.
 
     Coordinates are rotated about the image center just like a card would lie
-    on a physically rotated mat.
+    on a physically rotated mat. The canvas is sized so no angle clips the card.
     """
     img = np.full((size[1], size[0], 3), 35, np.uint8)
     rect = np.array(
         [
-            [140, 40],
-            [140 + CARD_W, 40],
-            [140 + CARD_W, 40 + CARD_H],
-            [140, 40 + CARD_H],
+            [-CARD_W / 2, -CARD_H / 2],
+            [CARD_W / 2, -CARD_H / 2],
+            [CARD_W / 2, CARD_H / 2],
+            [-CARD_W / 2, CARD_H / 2],
         ],
         np.float32,
-    )
+    ) + np.float32([size[0] / 2, size[1] / 2])
     if angle != 0.0:
         M = cv2.getRotationMatrix2D((size[0] / 2, size[1] / 2), angle, 1.0)
         rect = cv2.transform(rect.reshape(-1, 1, 2), M).reshape(-1, 2)
@@ -69,4 +68,4 @@ def test_warp_is_angle_invariant():
     crops = [warp_card(mat_with_card(a), find_card_quads(mat_with_card(a))[0]) for a in (0.0, 25.0, -40.0)]
     hashes = [cv2.cvtColor(c, cv2.COLOR_BGR2GRAY).mean() for c in crops]
     # Grayscale mean of an identical cropped card must match across a few degrees.
-    assert max(hashes) - min(hashes) < pytest.approx(6.0, abs=6.0)
+    assert max(hashes) - min(hashes) <= 6.0
