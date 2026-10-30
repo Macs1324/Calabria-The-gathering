@@ -17,6 +17,7 @@ import logging
 import os
 import secrets
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -57,8 +58,21 @@ class RoomStore:
     def get(self, room_id: str) -> Room | None:
         return self._rooms.get(room_id.upper())
 
-    def join(self, room_id: str, name: str, *, token: str | None = None) -> str:
-        """Seat `name` (or reclaim it with `token`) and return the seat token."""
+    def join(
+        self,
+        room_id: str,
+        name: str,
+        *,
+        token: str | None = None,
+        can_reclaim: Callable[[str], bool] = lambda name: False,
+    ) -> str:
+        """Seat `name` (or reclaim it) and return the seat token.
+
+        A seat is reclaimed with its token, or — when the token is lost (new
+        device, cleared storage) — by name, if `can_reclaim(name)` says the
+        seat is unattended (the API checks for open sockets). Reclaiming by
+        name revokes the old token.
+        """
         room = self._require(room_id)
         name = name.strip()
         if not name or len(name) > MAX_NAME_LEN:
@@ -68,7 +82,12 @@ class RoomStore:
             if token is not None and seats.get(token) == name:
                 return token
             if name in seats.values():
-                raise ValueError(f"name {name!r} is taken in this room")
+                if not can_reclaim(name):
+                    raise ValueError(f"name {name!r} is taken in this room (and that player is online)")
+                fresh = secrets.token_urlsafe(16)
+                self._seats[room.id] = {t: n for t, n in seats.items() if n != name} | {fresh: name}
+                self._save(room.id)
+                return fresh
             room.apply("player_join", name)
             token = secrets.token_urlsafe(16)
             seats[token] = name

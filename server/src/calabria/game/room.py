@@ -72,6 +72,7 @@ def apply_event(state: dict[str, Any], event: Event) -> dict[str, Any]:
 
 
 def _player_leave(s: dict[str, Any], actor: str, payload: dict[str, Any], seq: int) -> None:
+    successor = _next_player(s, actor) if s["turn"]["player"] == actor else s["turn"]["player"]
     s["players"].remove(actor)
     for zone in PUBLIC_ZONES:
         s[zone] = [c for c in s[zone] if c["owner"] != actor]
@@ -79,8 +80,7 @@ def _player_leave(s: dict[str, Any], actor: str, payload: dict[str, Any], seq: i
         if entry["controller"] == actor:
             entry["controller"] = entry["owner"]
     s["life"].pop(actor, None)
-    if s["turn"]["player"] == actor:
-        s["turn"]["player"] = s["players"][0] if s["players"] else None
+    s["turn"]["player"] = successor if s["players"] else None
 
 
 def _card_play(s: dict[str, Any], actor: str, payload: dict[str, Any], seq: int) -> None:
