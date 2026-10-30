@@ -59,7 +59,11 @@ def test_room_play_round_trip():
     c.post(f"/rooms/{room_id}/events", json={"type": "player_join", "actor": "al"})
     c.post(f"/rooms/{room_id}/events", json={"type": "card_play", "actor": "al", "payload": {"card_id": "isle"}})
     snap = c.get(f"/rooms/{room_id}").json()
-    assert snap["battlefield"] == [{"card_id": "isle", "controller": "al", "entry_seq": 1, "tapped": False}]
+    (entry,) = snap["battlefield"]
+    assert entry["card_id"] == "isle"
+    assert entry["controller"] == "al"
+    assert entry["entry_seq"] == 1
+    assert entry["tapped"] is False
 
 
 def test_invalid_event_400_with_message():
