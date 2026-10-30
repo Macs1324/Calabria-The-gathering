@@ -61,6 +61,23 @@ tapped. Synthetic, N=400, 55,603-card index (2026-10-30): detected 95.5%,
 name@1 89.0%, name@3 89.5%. Real-photo numbers: not measured yet — that is
 the next calibration step.
 
+## Hands-free play (client)
+
+Goal: touch as little as possible while playing.
+
+- **Mat watch** (`app/src/MatCamera.tsx`, `matWatch.ts`): a 64x36 thumbnail
+  diff every 300 ms gates scans — the server is asked only once the scene
+  changed and then held still, and each change is scanned twice before
+  acting (hands sweeping over cards cause nothing). Decisions are
+  edge-triggered: only a *change* between two stable views acts (new card →
+  play, tapped count changed → tap/untap, card gone → ask where it went), so
+  digital moves are never fought over. The first view is a baseline.
+- **Confidence** (`server/.../vision/scan.py`): `confident` = best distance
+  <= 50 and >= 12 bits ahead of the runner-up. On 751 synthetic scans this
+  auto-played 79% with 0 wrong; the rest get a one-tap/one-word confirm.
+- **Voice** (`voice.ts`): Web Speech API, whole-utterance grammar so table
+  talk never fires. Every automatic or spoken action lands in an Undo feed.
+
 ## Game state (tier 0)
 
 Event-sourced: `apply(events) -> state`, rooms are a fold over an event log.

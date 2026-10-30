@@ -1,20 +1,43 @@
-import { useEffect, useMemo, useState } from "react";
-import { AddCard } from "./AddCard";
+import {
+  MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { AddCard, PlayOptions } from "./AddCard";
 import {
   CardEntry,
   GameState,
   MoveTarget,
   PUBLIC_ZONES,
+  ScanCandidate,
   Seat,
   Zone,
+  api,
   cardImage,
+  storageGet,
+  storageSet,
 } from "./api";
 import { Board } from "./Board";
+import { ConfirmTray } from "./ConfirmTray";
 import { Log } from "./Log";
+import { MatCamera } from "./MatCamera";
+import { Plan } from "./matWatch";
+import { Command } from "./voice";
+import { VoiceControl } from "./VoiceControl";
 import { RoomActions, useRoom } from "./useRoom";
 
 const PHASES = ["main", "combat", "main 2", "end"];
-const DICE = [6, 20];
+const CAMERA_KEY = "calabria.cameraOn";
+const FEED_MS = 6000;
+
+interface FeedItem {
+  id: number;
+  text: string;
+  undoable: boolean;
+}
 
 export function Table({
   code,
@@ -32,10 +55,21 @@ export function Table({
     seat?.token ?? null,
   );
   const [selected, setSelected] = useState<number | null>(null);
-  const [preview, setPreview] = useState<CardEntry | null>(null);
+  const [zoom, setZoom] = useState<{
+    card: CardEntry;
+    x: number;
+    y: number;
+  } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [camera, setCamera] = useState(() => storageGet(CAMERA_KEY) === "on");
+  const [candidates, setCandidates] = useState<ScanCandidate[] | null>(null);
+  const [left, setLeft] = useState<CardEntry[]>([]);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const scanRef = useRef<(() => void) | null>(null);
 
   const you = view?.you ?? null;
+  const state = view?.state;
+
   useEffect(() => {
     if (view && seat && view.you === null) onSeatRejected();
   }, [view, seat, onSeatRejected]);
@@ -46,7 +80,8 @@ export function Table({
     return () => window.clearTimeout(t);
   }, [error, clearError]);
 
-  const state = view?.state;
+  useEffect(() => storageSet(CAMERA_KEY, camera ? "on" : "off"), [camera]);
+
   const selectedCard = useMemo(
     () => (state && selected !== null ? findCard(state, selected) : null),
     [state, selected],
@@ -56,9 +91,115 @@ export function Table({
       setSelected(null); // it left public view
   }, [state, selected]);
 
+  const mine = useMemo(
+    () =>
+      state && you ? state.battlefield.filter((c) => c.controller === you) : [],
+    [state, you],
+  );
+  // Departure prompts only for cards still on your battlefield.
+  const leftNow = useMemo(
+    () => left.filter((c) => mine.some((m) => m.entry_seq === c.entry_seq)),
+    [left, mine],
+  );
+
+  // --- activity feed (every automatic action can be undone from here) ------
+  const feedId = useRef(0);
+  const notify = useCallback((text: string, undoable = true) => {
+    const id = ++feedId.current;
+    setFeed((f) => [...f.slice(-4), { id, text, undoable }]);
+    window.setTimeout(
+      () => setFeed((f) => f.filter((i) => i.id !== id)),
+      FEED_MS,
+    );
+  }, []);
+
+  const playCard = useCallback(
+    (
+      card: { card_id: string; name: string | null },
+      via: string,
+      opts?: PlayOptions,
+    ) => {
+      send("card_play", {
+        card_id: card.card_id,
+        name: card.name,
+        zone: opts?.zone ?? "battlefield",
+        token: opts?.token ?? false,
+        tapped: opts?.tapped ?? false,
+      });
+      if (via) notify(`${via} Played ${card.name ?? "a card"}`);
+    },
+    [send, notify],
+  );
+
+  const onPlan = useCallback(
+    (plan: Plan) => {
+      plan.play.forEach((c) => playCard(c, "📷"));
+      for (const t of plan.tap) {
+        send("card_tap", t);
+        const name =
+          mine.find((m) => m.entry_seq === t.entry)?.name ?? "a card";
+        notify(`📷 ${t.tapped ? "Tapped" : "Untapped"} ${name}`);
+      }
+      if (plan.left.length) {
+        setLeft((prev) => [
+          ...prev,
+          ...plan.left.filter(
+            (c) => !prev.some((p) => p.entry_seq === c.entry_seq),
+          ),
+        ]);
+      }
+      if (plan.unsure) setCandidates(plan.unsure.candidates);
+    },
+    [playCard, send, notify, mine],
+  );
+
+  const pick = useCallback(
+    (c: ScanCandidate) => {
+      playCard(c, "📷");
+      setCandidates(null);
+    },
+    [playCard],
+  );
+
+  const onCommand = useCallback(
+    (cmd: Command, heard: string) => {
+      switch (cmd.kind) {
+        case "event":
+          send(cmd.type, cmd.payload);
+          notify(`🎙 “${heard.trim()}”`);
+          return;
+        case "undo":
+          undo();
+          notify("🎙 Undone", false);
+          return;
+        case "scan":
+          if (scanRef.current) scanRef.current();
+          else notify("🎙 Turn the camera on to scan", false);
+          return;
+        case "pick":
+          if (candidates?.[cmd.index]) pick(candidates[cmd.index]);
+          return;
+        case "play":
+          api
+            .search(cmd.query)
+            .then(({ results }) =>
+              results[0]
+                ? playCard(results[0], "🎙")
+                : notify(`🎙 No card called “${cmd.query}”`, false),
+            )
+            .catch(() => notify("🎙 Search failed", false));
+      }
+    },
+    [send, undo, notify, candidates, pick, playCard],
+  );
+
   useShortcuts(you !== null, selectedCard, { send, undo }, () =>
     setSelected(null),
   );
+
+  const onPreview = useCallback((card: CardEntry | null, e?: MouseEvent) => {
+    setZoom(card && e ? { card, x: e.clientX, y: e.clientY } : null);
+  }, []);
 
   if (!view || !state) {
     return (
@@ -88,63 +229,89 @@ export function Table({
       <header className="topbar">
         <img className="sigil" src="/sigil.png" alt="" />
         <button className="room-code" title="Copy invite link" onClick={invite}>
-          {copied ? "Link copied!" : code}
+          {copied ? "Link copied" : code}
         </button>
         <span
           className={`conn ${status}`}
           title={status === "open" ? "Connected" : "Reconnecting…"}
         />
-        <div className="turn">
-          Turn {state.turn.number} ·{" "}
-          <strong>
-            {state.turn.player === you
-              ? "your turn"
-              : `${state.turn.player ?? "—"}'s turn`}
-          </strong>
+
+        <div className={`turn-pill ${yourTurn ? "yours" : ""}`}>
+          <span className="turn-no">T{state.turn.number}</span>
+          <span>
+            {yourTurn ? "Your turn" : `${state.turn.player ?? "—"}'s turn`}
+          </span>
         </div>
         {you && (
-          <>
-            <div className="phases">
-              {PHASES.map((p) => (
-                <button
-                  key={p}
-                  className={state.phase === p ? "on" : ""}
-                  onClick={() => send("phase_set", { phase: p })}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-            <button
-              className={yourTurn ? "primary" : ""}
-              onClick={() => send("turn_end")}
-              title="Passes the turn and untaps the next player"
-            >
-              End turn
-            </button>
-            <button onClick={() => send("untap_all")}>Untap all</button>
-            <button onClick={undo} title="Undo your last action (Ctrl+Z)">
-              Undo
-            </button>
-            {DICE.map((sides) => (
-              <button key={sides} onClick={() => send("dice_roll", { sides })}>
-                d{sides}
+          <div className="phases">
+            {PHASES.map((p) => (
+              <button
+                key={p}
+                className={state.phase === p ? "on" : ""}
+                onClick={() => send("phase_set", { phase: p })}
+              >
+                {p}
               </button>
             ))}
-            {state.last_roll && (
-              <span className="roll">
-                {state.last_roll.player} rolled{" "}
-                <strong>{state.last_roll.result}</strong> (d
-                {state.last_roll.sides})
-              </span>
-            )}
+          </div>
+        )}
+        {state.last_roll && (
+          <span className="roll">
+            🎲 {state.last_roll.player}:{" "}
+            <strong>{state.last_roll.result}</strong>
+            <span className="muted"> /d{state.last_roll.sides}</span>
+          </span>
+        )}
+
+        <div className="spacer" />
+
+        {you && (
+          <>
+            <VoiceControl
+              ctx={{ you, players: state.players }}
+              onCommand={onCommand}
+            />
+            <div className="tool-group">
+              <button
+                onClick={undo}
+                title="Undo your last action (Ctrl+Z, or say “undo”)"
+              >
+                ↶ Undo
+              </button>
+              <button
+                onClick={() => send("untap_all")}
+                title="Untap your permanents"
+              >
+                ⟳ Untap
+              </button>
+              <button
+                onClick={() => send("dice_roll", { sides: 20 })}
+                title="Roll a d20"
+              >
+                d20
+              </button>
+              <button
+                onClick={() => send("dice_roll", { sides: 6 })}
+                title="Roll a d6"
+              >
+                d6
+              </button>
+            </div>
+            <NewGame players={state.players} send={send} />
           </>
         )}
-        <div className="spacer" />
-        {you && <NewGame players={state.players} send={send} />}
         <button className="ghost" onClick={onLeave}>
           Leave
         </button>
+        {you && (
+          <button
+            className="end-turn primary"
+            onClick={() => send("turn_end")}
+            title="Pass the turn (or say “end turn”)"
+          >
+            End turn ➜
+          </button>
+        )}
       </header>
 
       <main className="play">
@@ -158,7 +325,7 @@ export function Table({
               online={view.online.includes(player)}
               selected={selected}
               onSelect={(seq) => setSelected(seq === selected ? null : seq)}
-              onPreview={setPreview}
+              onPreview={onPreview}
               send={send}
             />
           ))}
@@ -168,15 +335,30 @@ export function Table({
         </div>
 
         <aside className="sidebar">
-          <div className="preview">
-            {preview ? (
-              <img src={cardImage(preview.card_id)} alt={preview.name ?? ""} />
-            ) : (
-              <p className="muted">Hover a card to see it up close.</p>
-            )}
-          </div>
           {you ? (
-            <AddCard send={send} />
+            <>
+              {camera ? (
+                <MatCamera
+                  mine={mine}
+                  onPlan={onPlan}
+                  onCandidates={setCandidates}
+                  scanRef={scanRef}
+                  onClose={() => setCamera(false)}
+                />
+              ) : (
+                <section className="panel go-hands-free">
+                  <h4>Play hands-free</h4>
+                  <p className="muted small">
+                    Point your webcam at your mat: cards you lay down, tap and
+                    take away are tracked for you.
+                  </p>
+                  <button className="primary" onClick={() => setCamera(true)}>
+                    📷 Turn on mat camera
+                  </button>
+                </section>
+              )}
+              <AddCard onPlay={(card, opts) => playCard(card, "", opts)} />
+            </>
           ) : (
             <p className="muted panel small">
               Watching. Join from the lobby to play.
@@ -186,20 +368,76 @@ export function Table({
         </aside>
       </main>
 
-      {selectedCard && you && (
-        <SelectedBar
-          card={selectedCard}
-          players={state.players}
-          send={send}
-          onClose={() => setSelected(null)}
-        />
+      {feed.length > 0 && (
+        <div className="feed">
+          {feed.map((item, i) => (
+            <div key={item.id} className="feed-item">
+              <span>{item.text}</span>
+              {item.undoable && i === feed.length - 1 && (
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    undo();
+                    setFeed((f) => f.filter((x) => x.id !== item.id));
+                  }}
+                >
+                  Undo
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       )}
+
+      <div className="bottom-dock">
+        {you && (
+          <ConfirmTray
+            candidates={candidates}
+            left={leftNow}
+            onPick={pick}
+            onDismissCandidates={() => setCandidates(null)}
+            onMove={(card, zone) => {
+              send("card_move", { entry: card.entry_seq, zone });
+              setLeft((l) => l.filter((c) => c.entry_seq !== card.entry_seq));
+            }}
+            onKeep={(card) =>
+              setLeft((l) => l.filter((c) => c.entry_seq !== card.entry_seq))
+            }
+          />
+        )}
+        {selectedCard && you && (
+          <SelectedBar
+            card={selectedCard}
+            players={state.players}
+            send={send}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </div>
+
+      {zoom && <Zoom {...zoom} />}
       {error && (
         <div className="toast" onClick={clearError}>
           {error}
         </div>
       )}
     </div>
+  );
+}
+
+/** Big card image next to the pointer, on the side with more room. */
+function Zoom({ card, x, y }: { card: CardEntry; x: number; y: number }) {
+  const W = 280;
+  const H = W * (88 / 63);
+  const left = x > window.innerWidth / 2 ? x - W - 24 : x + 24;
+  const top = Math.min(Math.max(12, y - H / 2), window.innerHeight - H - 12);
+  return (
+    <img
+      className="zoom"
+      src={cardImage(card.card_id)}
+      alt={card.name ?? ""}
+      style={{ left, top, width: W }}
+    />
   );
 }
 
@@ -322,7 +560,12 @@ function NewGame({
   const [open, setOpen] = useState(false);
   const [life, setLife] = useState(20);
   const [first, setFirst] = useState(players[0] ?? "");
-  if (!open) return <button onClick={() => setOpen(true)}>New game…</button>;
+  if (!open)
+    return (
+      <button className="ghost" onClick={() => setOpen(true)}>
+        New game…
+      </button>
+    );
   return (
     <span className="new-game">
       <select
