@@ -76,6 +76,32 @@ export function AddCard({
   return (
     <section className="dock-section add-card">
       <h4>Play a card</h4>
+      <div className="segmented wide" role="group" aria-label="Play to">
+        {ZONES.map(([z, label]) => (
+          <button key={z} aria-pressed={zone === z} onClick={() => setZone(z)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="row toggles">
+        <button
+          className="chip"
+          aria-pressed={token}
+          onClick={() => setToken((t) => !t)}
+        >
+          {token && <Icon name="check" size={14} />}
+          Token
+        </button>
+        <button
+          className="chip"
+          aria-pressed={tapped && zone === "battlefield"}
+          disabled={zone !== "battlefield"}
+          onClick={() => setTapped((t) => !t)}
+        >
+          {tapped && zone === "battlefield" && <Icon name="check" size={14} />}
+          Tapped
+        </button>
+      </div>
       <div className="search">
         <Icon name="search" size={16} />
         <input
@@ -125,32 +151,6 @@ export function AddCard({
             ))}
           </ul>
         )}
-      </div>
-      <div className="segmented wide" role="group" aria-label="Play to">
-        {ZONES.map(([z, label]) => (
-          <button key={z} aria-pressed={zone === z} onClick={() => setZone(z)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="row toggles">
-        <button
-          className="chip"
-          aria-pressed={token}
-          onClick={() => setToken((t) => !t)}
-        >
-          {token && <Icon name="check" size={14} />}
-          Token
-        </button>
-        <button
-          className="chip"
-          aria-pressed={tapped && zone === "battlefield"}
-          disabled={zone !== "battlefield"}
-          onClick={() => setTapped((t) => !t)}
-        >
-          {tapped && zone === "battlefield" && <Icon name="check" size={14} />}
-          Tapped
-        </button>
       </div>
     </section>
   );
