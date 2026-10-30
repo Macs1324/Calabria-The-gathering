@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from calabria.api.main import create_app
 from calabria.scryfall.cards import CardMetaStore
 from calabria.vision.build import build_card_index, load_persisted_index
+from calabria.vision.detect import ART_WINDOW
 from calabria.vision.index import CardIndex
 from calabria.vision.phash import dhash
 
@@ -67,9 +68,16 @@ def synthetic_art(h: int, w: int) -> np.ndarray:
 
 
 def synthetic_frame() -> bytes:
-    frame = np.full((640, 960, 3), 35, np.uint8)
-    art = synthetic_art(440, 315)
-    frame[100:540, 322:637] = cv2.cvtColor(art, cv2.COLOR_GRAY2BGR)
+    """A bright art inside a white full-card frame on a dark mat (real-card geometry)."""
+    frame = np.full((800, 960, 3), 35, np.uint8)
+    art = synthetic_art(300, 200)
+    x0, y0, x1, y1 = ART_WINDOW
+    h_card = int(300 / (y1 - y0))
+    w_card = int(200 / (x1 - x0))
+    card = np.full((h_card, w_card, 3), 235, np.uint8)
+    card[int(y0 * h_card) : int(y0 * h_card) + 300, int(x0 * w_card) : int(x0 * w_card) + 200] = cv2.cvtColor(art, cv2.COLOR_GRAY2BGR)
+    cx, cy = (960 - w_card) // 2, (800 - h_card) // 2
+    frame[cy : cy + h_card, cx : cx + w_card] = card
     ok, buf = cv2.imencode(".png", frame)
     assert ok
     return base64.b64encode(buf).decode()
@@ -135,7 +143,7 @@ def test_load_persisted_index_missing_dir(tmp_path):
 def test_scan_route_joins_names(tmp_path):
     """The scan endpoint enriches candidates with names from the metadata store."""
     app = create_app(data_dir=tmp_path)
-    art = synthetic_art(440, 315)
+    art = synthetic_art(300, 200)
     app.state.card_index.add("sentinel", art)
     app.state.meta_store.upsert_many(
         [{"card_id": "sentinel", "name": "Mana Castle", "set_code": "big", "art_crop_uri": "u"}]

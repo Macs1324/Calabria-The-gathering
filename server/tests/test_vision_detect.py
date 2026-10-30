@@ -68,9 +68,9 @@ def test_crop_art_window_returns_central_inset():
     art = gradient(320, 224, horizontal=True)
     card = card_with_art_frame(art)
     window = crop_art_window(card)
-    assert window.shape == art.shape
-    # art survives as the exact pixels inside the frame
-    assert np.array_equal(window, art)
+    assert window.shape == cv2.cvtColor(art, cv2.COLOR_GRAY2BGR).shape
+    # art survives as the exact pixels inside the frame (gray-fold equality)
+    assert np.array_equal(cv2.cvtColor(window, cv2.COLOR_BGR2GRAY), art)
 
 
 def gradient(h: int, w: int, horizontal: bool = True) -> np.ndarray:
@@ -80,12 +80,13 @@ def gradient(h: int, w: int, horizontal: bool = True) -> np.ndarray:
 
 def card_with_art_frame(art: np.ndarray) -> np.ndarray:
     """A full-card-sized canvas whose art window holds `art` (detect.py geometry)."""
-    ha, wa = art.shape[:2]
+    art_bgr = cv2.cvtColor(art, cv2.COLOR_GRAY2BGR) if art.ndim == 2 else art
+    ha, wa = art_bgr.shape[:2]
     x0, y0, x1, y1 = ART_WINDOW
     h_card = int(ha / (y1 - y0))
     w_card = int(wa / (x1 - x0))
     card = np.full((h_card, w_card, 3), 235, np.uint8)
-    card[int(y0 * h_card) : int(y0 * h_card) + ha, int(x0 * w_card) : int(x0 * w_card) + wa] = art
+    card[int(y0 * h_card) : int(y0 * h_card) + ha, int(x0 * w_card) : int(x0 * w_card) + wa] = art_bgr
     return card
 
 

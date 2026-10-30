@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from calabria.game.room import Room
 from calabria.scryfall.cards import CardMetaStore
 from calabria.vision.build import load_persisted_index
-from calabria.vision.detect import find_card_quads, warp_card
+from calabria.vision.detect import crop_art_window, find_card_quads, warp_card
 from calabria.vision.index import CardIndex
 from calabria.vision.phash import dhash
 
@@ -77,7 +77,10 @@ def _mount_routes(app: FastAPI) -> None:
         frame = _decode_image(req.image)
         cards = []
         for quad in find_card_quads(frame):
-            hash_bytes = dhash(warp_card(frame, quad))
+            # Webcam cards wear borders and name bars; hash only the art window
+            # so the warp aligns with Scryfall art_crop index entries.
+            art = crop_art_window(warp_card(frame, quad))
+            hash_bytes = dhash(art)
             candidates = [_describe(app, card_id, distance) for card_id, distance in app.state.card_index.search(hash_bytes, k=3)]
             cards.append(
                 {
