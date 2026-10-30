@@ -17,7 +17,7 @@ def synthetic_art(h: int, w: int) -> np.ndarray:
 
     Bright enough (>=130) to survive Otsu against the dark (35) playmat.
     """
-    yy, xx = np.mgrid[0:h, 0:w]
+    _yy, xx = np.mgrid[0:h, 0:w]
     base = 130 + (xx * 100 // max(w - 1, 1))  # horizontal ramp 130..230
     stripe = np.where((xx // 8) % 2, 20, 0)  # vertical stripes
     return np.clip(base + stripe, 0, 255).astype(np.uint8)
