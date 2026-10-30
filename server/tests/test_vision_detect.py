@@ -8,7 +8,7 @@ produce one quad per card and an upright crop of the standard size.
 import cv2
 import numpy as np
 
-from calabria.vision.detect import find_card_quads, warp_card
+from calabria.vision.detect import ART_WINDOW, crop_art_window, find_card_quads, warp_card
 
 CARD_W, CARD_H = 315, 440  # 63:88 standard MTG card ratio
 
@@ -61,6 +61,32 @@ def test_tiny_blobs_ignored():
 def test_warp_produces_upright_crop():
     crop = warp_card(mat_with_card(), find_card_quads(mat_with_card())[0])
     assert crop.shape == (CARD_H, CARD_W, 3)
+
+
+def test_crop_art_window_returns_central_inset():
+    """The scan flow hashes the art window of a full-card crop, not the border."""
+    art = gradient(320, 224, horizontal=True)
+    card = card_with_art_frame(art)
+    window = crop_art_window(card)
+    assert window.shape == art.shape
+    # art survives as the exact pixels inside the frame
+    assert np.array_equal(window, art)
+
+
+def gradient(h: int, w: int, horizontal: bool = True) -> np.ndarray:
+    axis = np.tile(np.linspace(0, 255, w).astype(np.uint8), (h, 1))
+    return axis if horizontal else axis.T
+
+
+def card_with_art_frame(art: np.ndarray) -> np.ndarray:
+    """A full-card-sized canvas whose art window holds `art` (detect.py geometry)."""
+    ha, wa = art.shape[:2]
+    x0, y0, x1, y1 = ART_WINDOW
+    h_card = int(ha / (y1 - y0))
+    w_card = int(wa / (x1 - x0))
+    card = np.full((h_card, w_card, 3), 235, np.uint8)
+    card[int(y0 * h_card) : int(y0 * h_card) + ha, int(x0 * w_card) : int(x0 * w_card) + wa] = art
+    return card
 
 
 def test_warp_is_angle_invariant():
