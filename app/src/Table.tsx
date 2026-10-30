@@ -10,6 +10,7 @@ import { AddCard, PlayOptions } from "./AddCard";
 import {
   CardEntry,
   GameState,
+  LogEvent,
   MoveTarget,
   PUBLIC_ZONES,
   ScanCandidate,
@@ -36,7 +37,9 @@ const FEED_MS = 6000;
 interface FeedItem {
   id: number;
   text: string;
-  undoable: boolean;
+  // The event this item stands for. Undo only shows while that event is
+  // still the room's latest and yours: server undo pops exactly one event.
+  expect?: { type: string; name?: string | null };
 }
 
 export function Table({
@@ -96,17 +99,25 @@ export function Table({
       state && you ? state.battlefield.filter((c) => c.controller === you) : [],
     [state, you],
   );
-  // Departure prompts only for cards still on your battlefield.
+  // Departure prompts only for cards still on your battlefield; forget the
+  // rest, so a card that comes back later doesn't revive an old prompt.
   const leftNow = useMemo(
     () => left.filter((c) => mine.some((m) => m.entry_seq === c.entry_seq)),
     [left, mine],
   );
+  useEffect(() => {
+    if (leftNow.length !== left.length) setLeft(leftNow);
+  }, [left, leftNow]);
+
+  useEffect(() => {
+    if (zoom && state && !findCard(state, zoom.card.entry_seq)) setZoom(null); // hovered card moved away
+  }, [zoom, state]);
 
   // --- activity feed (every automatic action can be undone from here) ------
   const feedId = useRef(0);
-  const notify = useCallback((text: string, undoable = true) => {
+  const notify = useCallback((text: string, expect?: FeedItem["expect"]) => {
     const id = ++feedId.current;
-    setFeed((f) => [...f.slice(-4), { id, text, undoable }]);
+    setFeed((f) => [...f.slice(-4), { id, text, expect }]);
     window.setTimeout(
       () => setFeed((f) => f.filter((i) => i.id !== id)),
       FEED_MS,
@@ -126,20 +137,20 @@ export function Table({
         token: opts?.token ?? false,
         tapped: opts?.tapped ?? false,
       });
-      if (via) notify(`${via} Played ${card.name ?? "a card"}`);
+      if (via) notify(`${via} Played ${card.name ?? "a card"}`, { type: "card_play", name: card.name });
     },
     [send, notify],
   );
 
   const onPlan = useCallback(
     (plan: Plan) => {
-      plan.play.forEach((c) => playCard(c, "📷"));
+      plan.play.forEach((c) => playCard(c, "📷", { zone: "battlefield", token: false, tapped: c.tapped }));
       for (const t of plan.tap) {
         send("card_tap", t);
-        const name =
-          mine.find((m) => m.entry_seq === t.entry)?.name ?? "a card";
-        notify(`📷 ${t.tapped ? "Tapped" : "Untapped"} ${name}`);
+        const name = mine.find((m) => m.entry_seq === t.entry)?.name ?? "a card";
+        notify(`📷 ${t.tapped ? "Tapped" : "Untapped"} ${name}`, { type: "card_tap" });
       }
+      if (plan.arrived.length) setLeft((prev) => prev.filter((c) => !plan.arrived.includes(c.name ?? ""))); // back on the mat
       if (plan.left.length) {
         setLeft((prev) => [
           ...prev,
@@ -166,15 +177,15 @@ export function Table({
       switch (cmd.kind) {
         case "event":
           send(cmd.type, cmd.payload);
-          notify(`🎙 “${heard.trim()}”`);
+          notify(`🎙 “${heard.trim()}”`, { type: cmd.type });
           return;
         case "undo":
           undo();
-          notify("🎙 Undone", false);
+          notify("🎙 Undone");
           return;
         case "scan":
           if (scanRef.current) scanRef.current();
-          else notify("🎙 Turn the camera on to scan", false);
+          else notify("🎙 Turn the camera on to scan");
           return;
         case "pick":
           if (candidates?.[cmd.index]) pick(candidates[cmd.index]);
@@ -185,9 +196,9 @@ export function Table({
             .then(({ results }) =>
               results[0]
                 ? playCard(results[0], "🎙")
-                : notify(`🎙 No card called “${cmd.query}”`, false),
+                : notify(`🎙 No card called “${cmd.query}”`),
             )
-            .catch(() => notify("🎙 Search failed", false));
+            .catch(() => notify("🎙 Search failed"));
       }
     },
     [send, undo, notify, candidates, pick, playCard],
@@ -373,7 +384,7 @@ export function Table({
           {feed.map((item, i) => (
             <div key={item.id} className="feed-item">
               <span>{item.text}</span>
-              {item.undoable && i === feed.length - 1 && (
+              {i === feed.length - 1 && canUndo(item, view.log, you) && (
                 <button
                   className="ghost"
                   onClick={() => {
@@ -423,6 +434,13 @@ export function Table({
       )}
     </div>
   );
+}
+
+/** Undo pops the room's latest event, so offer it only while that event is this item's. */
+function canUndo(item: FeedItem, log: LogEvent[], you: string | null): boolean {
+  const last = log[log.length - 1];
+  if (!item.expect || !last || last.actor !== you || last.type !== item.expect.type) return false;
+  return item.expect.name === undefined || last.payload.name === item.expect.name;
 }
 
 /** Big card image next to the pointer, on the side with more room. */

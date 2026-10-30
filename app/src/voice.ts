@@ -61,6 +61,8 @@ function toNumber(word: string): number | null {
 
 function normalize(text: string): string {
   return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // "José" and "jose" are the same name
     .toLowerCase()
     .replace(/[.,!?]/g, " ")
     .replace(/\s+/g, " ")
@@ -83,7 +85,7 @@ export function parseCommand(raw: string, ctx: VoiceContext): Command | null {
   const target = (who: string): string | null => {
     if (/^(the )?(opponent|them|him|her)$/.test(who))
       return others.length === 1 ? others[0] : null;
-    return ctx.players.find((p) => p.toLowerCase() === who) ?? null;
+    return ctx.players.find((p) => normalize(p) === who) ?? null;
   };
 
   if (/^(end|pass)( the| my)? turn$|^(i )?pass$|^next turn$/.test(t))
@@ -117,15 +119,15 @@ export function parseCommand(raw: string, ctx: VoiceContext): Command | null {
   m = t.match(new RegExp(`^(i )?(gain|plus) ${NUM}( life)?$`));
   if (m) return withNumber(m[3], (n) => life(n, ctx.you));
 
-  m = t.match(new RegExp(`^hit ([a-z ]+?) for ${NUM}( damage)?$`));
+  m = t.match(new RegExp(`^hit ([a-z0-9 ]+?) for ${NUM}( damage)?$`));
   if (m) return withTarget(target(m[1]), m[2], -1);
-  m = t.match(new RegExp(`^deal ${NUM}( damage)? to ([a-z ]+)$`));
+  m = t.match(new RegExp(`^deal ${NUM}( damage)? to ([a-z0-9 ]+)$`));
   if (m) return withTarget(target(m[3]), m[1], -1);
   m = t.match(
-    new RegExp(`^([a-z ]+?) (loses|takes|minus) ${NUM}( life| damage)?$`),
+    new RegExp(`^([a-z0-9 ]+?) (loses|takes|minus) ${NUM}( life| damage)?$`),
   );
   if (m) return withTarget(target(m[1]), m[3], -1);
-  m = t.match(new RegExp(`^([a-z ]+?) (gains|plus) ${NUM}( life)?$`));
+  m = t.match(new RegExp(`^([a-z0-9 ]+?) (gains|plus) ${NUM}( life)?$`));
   if (m) return withTarget(target(m[1]), m[3], 1);
 
   m = t.match(/^(play|cast) (.+)$/);
@@ -210,18 +212,28 @@ export function listen(
       if (e.results[i].isFinal) onPhrase(e.results[i][0].transcript);
     }
   };
+  const reasons: Record<string, string> = {
+    "not-allowed": "Microphone access was blocked.",
+    "service-not-allowed": "Microphone access was blocked.",
+    "audio-capture": "No microphone found.",
+    network: "Voice recognition is unreachable (it needs an internet connection).",
+  };
+  let restart: number | undefined;
   rec.onerror = (e) => {
-    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      stopped = true;
-      onError("Microphone access was blocked.");
-    }
+    // Silence just ends the session (restarted below). Anything else would
+    // fail again immediately, so stop instead of spinning.
+    if (e.error === "no-speech" || e.error === "aborted") return;
+    stopped = true;
+    onError(reasons[e.error] ?? `Voice stopped (${e.error}).`);
   };
   rec.onend = () => {
-    if (!stopped) rec.start(); // browsers end sessions after silence; keep listening
+    // Browsers end sessions after silence; keep listening, gently.
+    if (!stopped) restart = window.setTimeout(() => !stopped && rec.start(), 250);
   };
   rec.start();
   return () => {
     stopped = true;
+    window.clearTimeout(restart);
     rec.stop();
   };
 }

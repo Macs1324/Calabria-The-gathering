@@ -165,7 +165,12 @@ export function MatCamera({
     let committed: Observation | null = null;
     let pending: Observation | null = null;
     let confirmTimer: number | undefined;
+    let backoffUntil = 0; // after a failed scan, pause instead of retrying every tick
     let stopped = false;
+    const confirmLater = (ms: number) => {
+      window.clearTimeout(confirmTimer);
+      confirmTimer = window.setTimeout(look, ms);
+    };
 
     const thumb = (): Uint8ClampedArray | null => {
       const video = videoRef.current;
@@ -184,7 +189,11 @@ export function MatCamera({
     };
 
     const look = async () => {
-      if (busyRef.current || stopped) return;
+      if (stopped) return;
+      if (busyRef.current) {
+        if (pending) confirmLater(TICK_MS); // a manual scan is running: keep the second look
+        return;
+      }
       const frame = grab();
       const t = thumb();
       if (!frame || !t) return;
@@ -206,13 +215,12 @@ export function MatCamera({
           pending = null;
         } else {
           pending = obs; // first sighting of a change: look again before acting
-          window.clearTimeout(confirmTimer);
-          confirmTimer = window.setTimeout(look, CONFIRM_DELAY_MS);
+          confirmLater(CONFIRM_DELAY_MS);
         }
       } catch (e) {
-        setScanError(
-          `Scan failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setScanError(`Scan failed: ${e instanceof Error ? e.message : String(e)}`);
+        backoffUntil = Date.now() + 3000;
+        if (pending) confirmLater(3000);
       } finally {
         busyRef.current = false;
         if (!stopped) setStatus("watching");
@@ -220,6 +228,7 @@ export function MatCamera({
     };
 
     const timer = window.setInterval(() => {
+      if (Date.now() < backoffUntil) return;
       const t = thumb();
       if (!t) return;
       const moving = prevThumb !== null && diff(t, prevThumb) > MOVING;
@@ -236,8 +245,10 @@ export function MatCamera({
       stopped = true;
       window.clearInterval(timer);
       window.clearTimeout(confirmTimer);
+      setStatus("watching");
     };
-  }, [watch]);
+    // A new camera means a new view: start from a fresh baseline.
+  }, [watch, deviceId]);
 
   // Space scans manually, unless you're typing. A focused button would
   // otherwise "click" on Space, so take the key from it.
