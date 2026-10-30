@@ -74,3 +74,12 @@ def test_read_jsonl_entries_skips_blank_lines(tmp_path):
     dest.write_text('{"id": "a"}\n\n{"id": "b"}\n   \n')
     entries = read_jsonl_entries(dest)
     assert len(entries) == 2
+
+
+def test_read_jsonl_entries_handles_gzip(tmp_path):
+    import gzip
+
+    dest = tmp_path / "bulk.jsonl.gz"
+    dest.write_bytes(gzip.compress(b'{"id": "a"}\n{"id": "b"}\n'))
+    entries = read_jsonl_entries(dest)
+    assert [e["id"] for e in entries] == ["a", "b"]

@@ -11,10 +11,12 @@ names: entries carry `jsonl_download_uri` and `compressed_size`.
 
 from __future__ import annotations
 
+import gzip
+import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import httpx
 
@@ -80,11 +82,25 @@ def download_bulk_file(
 
 
 def read_jsonl_entries(path: Path) -> list[dict[str, Any]]:
-    """Parse a downloaded bulk file (skipping blank lines)."""
+    """Parse a downloaded bulk file (skipping blank lines).
+
+    Scryfall serves the bulk files gzipped; sniff the magic bytes instead of
+    trusting file extensions.
+    """
     entries = []
-    with path.open() as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                entries.append(json.loads(line))
+    with path.open("rb") as raw:
+        if raw.read(2) == b"\x1f\x8b":
+            raw.seek(0)
+            with gzip.open(raw, "rb") as inner:
+                _parse_lines(inner, entries)
+        else:
+            raw.seek(0)
+            _parse_lines(raw, entries)
     return entries
+
+
+def _parse_lines(byte_handle: IO[bytes], entries: list[dict[str, Any]]) -> None:
+    for line in io.TextIOWrapper(byte_handle, encoding="utf-8"):
+        line = line.strip()
+        if line:
+            entries.append(json.loads(line))
