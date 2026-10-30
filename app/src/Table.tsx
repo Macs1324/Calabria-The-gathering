@@ -25,7 +25,7 @@ import { Board } from "./Board";
 import { ConfirmTray } from "./ConfirmTray";
 import { Log } from "./Log";
 import { MatCamera } from "./MatCamera";
-import { Icon } from "./Icon";
+import { Icon, IconName } from "./Icon";
 import { Dialog, Menu } from "./Menu";
 import { seatColor } from "./seats";
 import { Plan } from "./matWatch";
@@ -44,6 +44,7 @@ const FEED_MS = 6000;
 
 interface FeedItem {
   id: number;
+  icon?: IconName;
   text: string;
   // The event this item stands for. Undo only shows while that event is
   // still the room's latest and yours: server undo pops exactly one event.
@@ -124,19 +125,22 @@ export function Table({
 
   // --- activity feed (every automatic action can be undone from here) ------
   const feedId = useRef(0);
-  const notify = useCallback((text: string, expect?: FeedItem["expect"]) => {
-    const id = ++feedId.current;
-    setFeed((f) => [...f.slice(-4), { id, text, expect }]);
-    window.setTimeout(
-      () => setFeed((f) => f.filter((i) => i.id !== id)),
-      FEED_MS,
-    );
-  }, []);
+  const notify = useCallback(
+    (text: string, icon?: IconName, expect?: FeedItem["expect"]) => {
+      const id = ++feedId.current;
+      setFeed((f) => [...f.slice(-4), { id, icon, text, expect }]);
+      window.setTimeout(
+        () => setFeed((f) => f.filter((i) => i.id !== id)),
+        FEED_MS,
+      );
+    },
+    [],
+  );
 
   const playCard = useCallback(
     (
       card: { card_id: string; name: string | null },
-      via: string,
+      via: IconName | null,
       opts?: PlayOptions,
     ) => {
       send("card_play", {
@@ -146,18 +150,24 @@ export function Table({
         token: opts?.token ?? false,
         tapped: opts?.tapped ?? false,
       });
-      if (via) notify(`${via} Played ${card.name ?? "a card"}`, { type: "card_play", name: card.name });
+      if (via)
+        notify(`Played ${card.name ?? "a card"}`, via, {
+          type: "card_play",
+          name: card.name,
+        });
     },
     [send, notify],
   );
 
   const onPlan = useCallback(
     (plan: Plan) => {
-      plan.play.forEach((c) => playCard(c, "📷", { zone: "battlefield", token: false, tapped: c.tapped }));
+      plan.play.forEach((c) => playCard(c, "camera", { zone: "battlefield", token: false, tapped: c.tapped }));
       for (const t of plan.tap) {
         send("card_tap", t);
         const name = mine.find((m) => m.entry_seq === t.entry)?.name ?? "a card";
-        notify(`📷 ${t.tapped ? "Tapped" : "Untapped"} ${name}`, { type: "card_tap" });
+        notify(`${t.tapped ? "Tapped" : "Untapped"} ${name}`, "camera", {
+          type: "card_tap",
+        });
       }
       if (plan.arrived.length) setLeft((prev) => prev.filter((c) => !plan.arrived.includes(c.name ?? ""))); // back on the mat
       if (plan.left.length) {
@@ -175,7 +185,7 @@ export function Table({
 
   const pick = useCallback(
     (c: ScanCandidate) => {
-      playCard(c, "📷");
+      playCard(c, "camera");
       setCandidates(null);
     },
     [playCard],
@@ -186,15 +196,15 @@ export function Table({
       switch (cmd.kind) {
         case "event":
           send(cmd.type, cmd.payload);
-          notify(`🎙 “${heard.trim()}”`, { type: cmd.type });
+          notify(`“${heard.trim()}”`, "mic", { type: cmd.type });
           return;
         case "undo":
           undo();
-          notify("🎙 Undone");
+          notify("Undone", "mic");
           return;
         case "scan":
           if (scanRef.current) scanRef.current();
-          else notify("🎙 Turn the camera on to scan");
+          else notify("Turn the camera on to scan", "mic");
           return;
         case "pick":
           if (candidates?.[cmd.index]) pick(candidates[cmd.index]);
@@ -204,10 +214,10 @@ export function Table({
             .search(cmd.query)
             .then(({ results }) =>
               results[0]
-                ? playCard(results[0], "🎙")
-                : notify(`🎙 No card called “${cmd.query}”`),
+                ? playCard(results[0], "mic")
+                : notify(`No card called “${cmd.query}”`, "mic"),
             )
-            .catch(() => notify("🎙 Search failed"));
+            .catch(() => notify("Search failed", "mic"));
       }
     },
     [send, undo, notify, candidates, pick, playCard],
@@ -412,7 +422,7 @@ export function Table({
                   </div>
                 </section>
               )}
-              <AddCard onPlay={(card, opts) => playCard(card, "", opts)} />
+              <AddCard onPlay={(card, opts) => playCard(card, null, opts)} />
             </>
           ) : (
             <section className="dock-section">
@@ -429,6 +439,7 @@ export function Table({
         <div className="feed">
           {feed.map((item, i) => (
             <div key={item.id} className="feed-item">
+              {item.icon && <Icon name={item.icon} size={15} />}
               <span>{item.text}</span>
               {i === feed.length - 1 && canUndo(item, view.log, you) && (
                 <button
@@ -533,6 +544,13 @@ const MOVES: [MoveTarget, string, string][] = [
 ];
 const COUNTERS = ["+1/+1", "-1/-1", "loyalty"];
 
+const ZONE_LABEL: Record<Zone, string> = {
+  battlefield: "On the battlefield",
+  graveyard: "In the graveyard",
+  exile: "In exile",
+  command: "In the command zone",
+};
+
 function SelectedBar({
   card,
   players,
@@ -546,77 +564,113 @@ function SelectedBar({
 }) {
   const [custom, setCustom] = useState("");
   const entry = card.entry_seq;
+  const kinds = [
+    ...COUNTERS,
+    ...Object.keys(card.counters).filter((k) => !COUNTERS.includes(k)),
+  ];
+  const others = players.filter((p) => p !== card.controller);
   return (
     <div className="selected-bar">
-      <strong className="selected-name">{card.name ?? card.card_id}</strong>
-      {card.zone === "battlefield" && (
-        <button
-          onClick={() => send("card_tap", { entry, tapped: !card.tapped })}
-        >
-          {card.tapped ? "Untap" : "Tap"} <kbd>T</kbd>
-        </button>
-      )}
-      <span className="group">
-        {MOVES.filter(([zone]) => zone !== card.zone).map(
-          ([zone, label, key]) => (
+      <img
+        className="sel-thumb"
+        src={cardImage(card.card_id, "small")}
+        alt=""
+      />
+      <div className="sel-body">
+        <div className="sel-title">
+          <strong>{card.name ?? card.card_id}</strong>
+          <span className="muted small">{ZONE_LABEL[card.zone]}</span>
+          <button
+            className="icon-btn sel-close"
+            aria-label="Deselect"
+            data-tip="Deselect · Esc"
+            onClick={onClose}
+          >
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+        <div className="sel-row">
+          {card.zone === "battlefield" && (
             <button
-              key={zone}
-              onClick={() => send("card_move", { entry, zone })}
+              onClick={() => send("card_tap", { entry, tapped: !card.tapped })}
             >
-              → {label} <kbd>{key}</kbd>
+              <Icon name={card.tapped ? "untap" : "tap"} size={15} />
+              {card.tapped ? "Untap" : "Tap"} <kbd>T</kbd>
             </button>
-          ),
-        )}
-      </span>
-      <span className="group">
-        {COUNTERS.map((kind) => (
-          <span key={kind} className="counter-ctl">
-            <button
-              onClick={() => send("card_counter", { entry, kind, delta: -1 })}
-            >
-              −
-            </button>
-            <span>{kind}</span>
-            <button
-              onClick={() => send("card_counter", { entry, kind, delta: 1 })}
-            >
-              +
-            </button>
+          )}
+          <span className="group">
+            <span className="group-label">Move to</span>
+            {MOVES.filter(([zone]) => zone !== card.zone).map(
+              ([zone, label, key]) => (
+                <button
+                  key={zone}
+                  className="chip"
+                  onClick={() => send("card_move", { entry, zone })}
+                >
+                  {label} <kbd>{key}</kbd>
+                </button>
+              ),
+            )}
           </span>
-        ))}
-        <form
-          className="counter-ctl"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (custom.trim())
-              send("card_counter", { entry, kind: custom.trim(), delta: 1 });
-          }}
-        >
-          <input
-            placeholder="other counter"
-            value={custom}
-            onChange={(e) => setCustom(e.currentTarget.value)}
-          />
-          <button type="submit">+</button>
-        </form>
-      </span>
-      {card.zone === "battlefield" && (
-        <span className="group">
-          {players
-            .filter((p) => p !== card.controller)
-            .map((p) => (
-              <button
-                key={p}
-                onClick={() => send("card_control", { entry, player: p })}
-              >
-                Give to {p}
-              </button>
+        </div>
+        <div className="sel-row">
+          <span className="group">
+            <span className="group-label">Counters</span>
+            {kinds.map((kind) => (
+              <span key={kind} className="counter-ctl">
+                <button
+                  aria-label={`Remove ${kind}`}
+                  disabled={!card.counters[kind]}
+                  onClick={() =>
+                    send("card_counter", { entry, kind, delta: -1 })
+                  }
+                >
+                  <Icon name="minus" size={13} />
+                </button>
+                <span>
+                  {kind} <b>{card.counters[kind] ?? 0}</b>
+                </span>
+                <button
+                  aria-label={`Add ${kind}`}
+                  onClick={() => send("card_counter", { entry, kind, delta: 1 })}
+                >
+                  <Icon name="plus" size={13} />
+                </button>
+              </span>
             ))}
-        </span>
-      )}
-      <button className="ghost" onClick={onClose} title="Esc">
-        ✕
-      </button>
+            <form
+              className="counter-new"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!custom.trim()) return;
+                send("card_counter", { entry, kind: custom.trim(), delta: 1 });
+                setCustom("");
+              }}
+            >
+              <input
+                placeholder="New counter…"
+                aria-label="New counter kind"
+                value={custom}
+                onChange={(e) => setCustom(e.currentTarget.value)}
+              />
+            </form>
+          </span>
+          {card.zone === "battlefield" && others.length > 0 && (
+            <span className="group">
+              <span className="group-label">Give to</span>
+              {others.map((p) => (
+                <button
+                  key={p}
+                  className="chip"
+                  onClick={() => send("card_control", { entry, player: p })}
+                >
+                  {p}
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { CardEntry, MoveTarget, ScanCandidate, cardImage } from "./api";
+import { Icon } from "./Icon";
 
 /**
  * The only questions hands-free mode asks: "which card is this?" (unsure
@@ -26,6 +27,7 @@ export function ConfirmTray({
       {candidates && (
         <div className="tray-card">
           <div className="tray-head">
+            <Icon name="scan" size={16} />
             <strong>
               {candidates.length ? "Which card is it?" : "Couldn't find a card"}
             </strong>
@@ -35,11 +37,12 @@ export function ConfirmTray({
                 : "hold it flatter, or type its name"}
             </span>
             <button
-              className="ghost"
+              className="icon-btn"
+              aria-label="None of these"
+              data-tip="None of these"
               onClick={onDismissCandidates}
-              title="None of these"
             >
-              ✕
+              <Icon name="x" size={16} />
             </button>
           </div>
           <div className="tray-candidates">
@@ -66,16 +69,20 @@ export function ConfirmTray({
           />
           <div className="left-body">
             <strong>{card.name} left your mat</strong>
+            <span className="muted small">Where did it go?</span>
             <div className="row">
-              <button
-                className="primary"
-                onClick={() => onMove(card, "graveyard")}
-              >
+              <button onClick={() => onMove(card, "graveyard")}>
                 Graveyard
               </button>
-              <button onClick={() => onMove(card, "exile")}>Exile</button>
-              <button onClick={() => onMove(card, "hand")}>Hand</button>
-              <button onClick={() => onMove(card, "library")}>Library</button>
+              <button className="chip" onClick={() => onMove(card, "exile")}>
+                Exile
+              </button>
+              <button className="chip" onClick={() => onMove(card, "hand")}>
+                Hand
+              </button>
+              <button className="chip" onClick={() => onMove(card, "library")}>
+                Library
+              </button>
               <button className="ghost" onClick={() => onKeep(card)}>
                 Still in play
               </button>
