@@ -357,3 +357,8 @@ def test_room_rolls_dice_when_result_missing():
     assert 1 <= room.state["last_roll"]["result"] <= 6
     # the rolled value is in the log, so replays are deterministic
     assert room.events[-1].payload["result"] == room.state["last_roll"]["result"]
+
+
+def test_player_leave_passes_turn_to_next_seat():
+    state = build([*seated("al", "bea", "cy"), Event("turn_end", "al", {}), Event("player_leave", "bea", {})])
+    assert state["turn"]["player"] == "cy"
