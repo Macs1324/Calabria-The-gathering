@@ -49,4 +49,10 @@ describe("parseCommand", () => {
   it("does not hit an ambiguous opponent", () => {
     expect(parseCommand("opponent loses 2", { you: "Max", players: ["Max", "Bea", "Cy"] })).toBeNull();
   });
+
+  it("targets players whose names have digits or accents", () => {
+    const c = { you: "Max", players: ["Max", "José", "Bea2"] };
+    expect(parseCommand("hit jose for 3", c)).toEqual({ kind: "event", type: "life_change", payload: { delta: -3, player: "José" } });
+    expect(parseCommand("Bea2 loses 1", c)).toEqual({ kind: "event", type: "life_change", payload: { delta: -1, player: "Bea2" } });
+  });
 });

@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { CardEntry, ScannedCard } from "./api";
 import { observe, reconcile, sameObservation } from "./matWatch";
 
-const scanned = (name: string, opts: { tapped?: boolean; confident?: boolean; id?: string } = {}): ScannedCard => {
+const scanned = (
+  name: string,
+  opts: { tapped?: boolean; confident?: boolean; id?: string; at?: [number, number] } = {},
+): ScannedCard => {
   const cand = { card_id: opts.id ?? `id-${name}`, name, set_code: "tst", distance: 10 };
+  const [x, y] = opts.at ?? [0, 0];
   return {
-    quad: [[0, 0], [1, 0], [1, 1], [0, 1]],
+    quad: [[x, y], [x + 100, y], [x + 100, y + 140], [x, y + 140]],
     tapped: opts.tapped ?? false,
     confident: opts.confident ?? true,
     candidates: [cand],
@@ -51,7 +55,7 @@ describe("reconcile", () => {
 
   it("plays a card that appears on the mat", () => {
     const plan = step([], [scanned("Sol Ring")], []);
-    expect(plan.play).toEqual([{ card_id: "id-Sol Ring", name: "Sol Ring" }]);
+    expect(plan.play).toEqual([{ card_id: "id-Sol Ring", name: "Sol Ring", tapped: false }]);
   });
 
   it("does not replay a card already in play (e.g. added by typing)", () => {
@@ -99,5 +103,28 @@ describe("reconcile", () => {
   it("does not ask when the unidentified card was already there", () => {
     const unsure = scanned("Mystery", { confident: false });
     expect(step([unsure], [unsure], []).unsure).toBeNull();
+  });
+
+  // --- review fixes ---------------------------------------------------------
+
+  it("a card that only became unsure has not left the mat", () => {
+    const flaky = scanned("Forest", { confident: false });
+    expect(step([scanned("Forest")], [flaky], [entry("Forest")]).left).toEqual([]);
+  });
+
+  it("a card that arrives tapped is played tapped", () => {
+    const plan = step([], [scanned("Forest", { tapped: true })], []);
+    expect(plan.play).toEqual([{ card_id: "id-Forest", name: "Forest", tapped: true }]);
+  });
+
+  it("asks about the new unsure card, not one that was already there", () => {
+    const old = scanned("Old", { confident: false, at: [0, 0] });
+    const fresh = scanned("Fresh", { confident: false, at: [600, 300] });
+    expect(step([old], [old, fresh], []).unsure).toBe(fresh);
+  });
+
+  it("reports names that came back, so stale prompts can go", () => {
+    const plan = step([], [scanned("Lightning Bolt")], [entry("Lightning Bolt")]);
+    expect(plan.arrived).toEqual(["Lightning Bolt"]);
   });
 });
