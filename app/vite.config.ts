@@ -24,6 +24,13 @@ export default defineConfig(() => ({
           port: 1421,
         }
       : undefined,
+    // `pnpm dev` in a browser: talk to a local server (uvicorn on :8000).
+    proxy: Object.fromEntries(
+      ["/rooms", "/cards", "/vision", "/health"].map((path) => [
+        path,
+        { target: "http://127.0.0.1:8000", ws: true },
+      ]),
+    ),
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

@@ -138,3 +138,23 @@ def test_scan_frame_without_cards_is_empty():
 def test_scan_rejects_garbage_image():
     res = client().post("/vision/scan", json={"image": base64.b64encode(b"not an image").decode()})
     assert res.status_code == 400
+
+
+# --- static web client ---------------------------------------------------------
+
+
+def test_serves_web_client_when_built(tmp_path):
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("<!doctype html><title>Calabria: The Gathering</title>")
+    (web / "assets" / "app.js").write_text("console.log('hi')")
+    c = TestClient(create_app(web_dir=web))
+    assert "Calabria: The Gathering" in c.get("/").text
+    assert c.get("/assets/app.js").status_code == 200
+    assert c.get("/health").json() == {"status": "ok"}  # API routes still win
+
+
+def test_no_web_client_is_fine(tmp_path):
+    c = TestClient(create_app(web_dir=tmp_path / "missing"))
+    assert c.get("/").status_code == 404
+    assert c.get("/health").status_code == 200
