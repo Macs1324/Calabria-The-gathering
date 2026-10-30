@@ -42,7 +42,13 @@ def test_results_are_deduped_by_name():
 
 
 def test_exact_then_prefix_then_word_prefix_then_substring():
-    assert names(search().query("bolt")) == ["Bolt", "Bolt Bend", "Boltwave", "Lightning Bolt"]
+    # ties go to the shorter (closer) name
+    assert names(search().query("bolt")) == ["Bolt", "Boltwave", "Bolt Bend", "Lightning Bolt"]
+
+
+def test_shorter_name_wins_ties():
+    s = CardSearch([("x1", "Emeritus of Conflict // Lightning Bolt", "sos"), ("x2", "Lightning Bolt", "lea")])
+    assert names(s.query("light bo"))[0] == "Lightning Bolt"
 
 
 def test_partial_words_in_any_order():
