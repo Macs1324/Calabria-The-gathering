@@ -69,6 +69,12 @@ export function VoiceControl({
     return () => window.clearTimeout(t);
   }, [heard]);
 
+  useEffect(() => {
+    if (!error) return;
+    const t = window.setTimeout(() => setError(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [error]);
+
   if (!supported) {
     return (
       <span className="voice">
@@ -109,7 +115,7 @@ export function VoiceControl({
           {heard.ok && <Icon name="check" size={13} />}“{heard.text}”
         </span>
       )}
-      {error && <span className="heard bad">{error}</span>}
+      {error && !heard && <span className="heard bad">{error}</span>}
       {help && (
         <div className="voice-help" onClick={() => setHelp(false)}>
           <strong>Say…</strong>

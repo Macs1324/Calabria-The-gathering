@@ -12,7 +12,7 @@ export function Log({ log, state }: { log: LogEvent[]; state: GameState }) {
     endRef.current?.scrollIntoView({ block: "nearest" });
   }, [log.length]);
 
-  let turn = 1;
+  const marks = turnMarks(log, state.turn.number);
   return (
     <section className="dock-section log">
       <h4>Activity</h4>
@@ -27,13 +27,12 @@ export function Log({ log, state }: { log: LogEvent[]; state: GameState }) {
               {text}
             </li>
           );
-          if (e.type === "game_reset") turn = 1;
-          if (e.type !== "turn_end" && e.type !== "game_reset") return item;
-          if (e.type === "turn_end") turn += 1;
+          if (!marks.has(e.seq)) return item;
+          const n = marks.get(e.seq);
           return [
             item,
             <li key={`${e.seq}-mark`} className="turn-mark">
-              <span>Turn {turn}</span>
+              <span>{n === null ? "Next turn" : `Turn ${n}`}</span>
             </li>,
           ];
         })}
@@ -41,6 +40,27 @@ export function Log({ log, state }: { log: LogEvent[]; state: GameState }) {
       </ol>
     </section>
   );
+}
+
+/**
+ * The turn each turn_end / game_reset starts. The server sends only the tail
+ * of the log, so count back from the current turn instead of up from 1;
+ * before a reset in the window the numbers are unknown (null).
+ */
+export function turnMarks(log: LogEvent[], current: number): Map<number, number | null> {
+  const marks = new Map<number, number | null>();
+  let turn: number | null = current;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const e = log[i];
+    if (e.type === "turn_end") {
+      marks.set(e.seq, turn);
+      turn = turn === null ? null : turn - 1;
+    } else if (e.type === "game_reset") {
+      marks.set(e.seq, 1);
+      turn = null;
+    }
+  }
+  return marks;
 }
 
 function cardNames(log: LogEvent[], state: GameState): Map<number, string> {

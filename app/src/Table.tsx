@@ -26,7 +26,7 @@ import { ConfirmTray } from "./ConfirmTray";
 import { Log } from "./Log";
 import { MatCamera } from "./MatCamera";
 import { Icon, IconName } from "./Icon";
-import { Dialog, Menu } from "./Menu";
+import { Dialog, Menu, overlayOpen } from "./Menu";
 import { seatColor } from "./seats";
 import { Plan } from "./matWatch";
 import { Command } from "./voice";
@@ -79,6 +79,8 @@ export function Table({
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [newGame, setNewGame] = useState(false);
   const scanRef = useRef<(() => void) | null>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [dockH, setDockH] = useState(0);
 
   const you = view?.you ?? null;
   const state = view?.state;
@@ -226,6 +228,17 @@ export function Table({
   useShortcuts(you !== null, selectedCard, { send, undo }, () =>
     setSelected(null),
   );
+
+  // The tray and selection bar float over the bottom of the table, where your
+  // own seat sits: keep that much of the table clear while they're up.
+  const hasView = view !== null;
+  useEffect(() => {
+    const dock = dockRef.current;
+    if (!dock) return;
+    const ro = new ResizeObserver(() => setDockH(dock.offsetHeight));
+    ro.observe(dock);
+    return () => ro.disconnect();
+  }, [hasView]);
 
   const onPreview = useCallback((card: CardEntry | null, e?: MouseEvent) => {
     setZoom(card && e ? { card, x: e.clientX, y: e.clientY } : null);
@@ -377,7 +390,10 @@ export function Table({
       </header>
 
       <main className="play">
-        <div className="boards">
+        <div
+          className="boards"
+          style={dockH ? { paddingBottom: dockH + 28 } : undefined}
+        >
           {order.map((player) => (
             <Board
               key={player}
@@ -457,7 +473,7 @@ export function Table({
         </div>
       )}
 
-      <div className="bottom-dock">
+      <div className="bottom-dock" ref={dockRef}>
         {you && (
           <ConfirmTray
             candidates={candidates}
@@ -739,7 +755,7 @@ function useShortcuts(
     if (!seated) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest("input, textarea, select")) return;
+      if (target.closest("input, textarea, select") || overlayOpen()) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         undo();

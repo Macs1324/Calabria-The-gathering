@@ -1,6 +1,10 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "./Icon";
 
+/** While a dialog or menu is open, table shortcuts stay out of the way. */
+export const overlayOpen = () =>
+  document.querySelector('[role="dialog"], [role="menu"]') !== null;
+
 export interface MenuItem {
   label: string;
   icon: IconName;

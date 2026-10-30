@@ -15,6 +15,7 @@ import {
   sameObservation,
 } from "./matWatch";
 import { Icon } from "./Icon";
+import { overlayOpen } from "./Menu";
 
 const MAX_WIDTH = 1280; // frames are downscaled before upload; plenty for 256-bit hashes
 const TICK_MS = 300; // motion check cadence
@@ -257,6 +258,9 @@ export function MatCamera({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (e.code !== "Space" || target.closest("input, textarea, select"))
+        return;
+      // Toggles and chips are answered by Space natively; leave them be.
+      if (target.closest(".segmented, .chip, [role=switch]") || overlayOpen())
         return;
       e.preventDefault();
       if (target instanceof HTMLButtonElement) target.blur();

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CardHit, Zone, api, cardImage } from "./api";
 import { Icon } from "./Icon";
+import { overlayOpen } from "./Menu";
 
 const ZONES: [Zone, string][] = [
   ["battlefield", "Battlefield"],
@@ -35,6 +36,7 @@ export function AddCard({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (e.key !== "/" || target.closest("input, textarea, select")) return;
+      if (overlayOpen()) return;
       e.preventDefault();
       inputRef.current?.focus();
     };

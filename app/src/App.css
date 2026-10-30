@@ -685,6 +685,7 @@ label input {
   overflow: auto;
   display: flex;
   flex-direction: column;
+  transition: padding-bottom 0.2s ease-out;
   background:
     radial-gradient(ellipse 80% 60% at 50% 50%, rgba(255, 240, 225, 0.035), transparent 70%),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
@@ -880,6 +881,11 @@ label input {
 .board:hover .life-btn,
 .life-btn:focus-visible {
   opacity: 1;
+}
+@media (hover: none) {
+  .life-btn {
+    opacity: 1;
+  }
 }
 .life-btn:hover:not(:disabled) {
   background: var(--hover);
@@ -1647,7 +1653,6 @@ label input {
     gap: 0.5em;
   }
   .mic-label,
-  .help-btn,
   .bar-sep {
     display: none;
   }
