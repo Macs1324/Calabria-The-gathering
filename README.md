@@ -104,6 +104,28 @@ candidate, and it appears on both screens. Use Discord or similar for voice
 and face cams; Calabria is the shared board. A plain, mid-tone playmat and
 unsleeved or clear-sleeved cards scan best.
 
+## Deploying to Fly.io
+
+`fly.toml` describes one small machine (512 MB, sleeps when idle) running
+`server/Dockerfile`, plus a 1 GB volume at `/data` for the card index and
+saved rooms. Fly provides the HTTPS the camera needs. One-time setup
+(`flyctl` is `nix shell nixpkgs#flyctl` on NixOS):
+
+```sh
+fly auth login
+fly apps create calabria-the-gathering         # or pick another name, and change `app` in fly.toml
+fly volumes create calabria_data --size 1 --region ams --yes
+fly deploy                                     # builds remotely; no local Docker needed
+
+# card data: build it locally (see above), then upload the two runtime files (~15 MB)
+fly ssh sftp put server/data/card_index.npz /data/card_index.npz
+fly ssh sftp put server/data/cards.db /data/cards.db
+fly machine restart                            # reload the index
+```
+
+Later updates are just `fly deploy`; the volume (index and rooms) is kept.
+After a card-index rebuild, upload the two files again and restart.
+
 ## Roadmap
 
 | # | Milestone | Status |
