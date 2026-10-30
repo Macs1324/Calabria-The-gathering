@@ -80,7 +80,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="Calabria: The Gathering",
-        version="0.3.0",
+        version="0.4.0",
         description="Camera-driven MTG dueling platform",
     )
     data_dir = data_dir if data_dir is not None else _relative_default_data_dir()
