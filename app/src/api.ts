@@ -70,6 +70,7 @@ export interface ScannedCard {
   tapped: boolean;
   candidates: ScanCandidate[];
   best: ScanCandidate | null;
+  confident: boolean; // safe to act on without asking (hands-free mode)
 }
 
 export interface Seat {
@@ -189,9 +190,9 @@ export const api = {
       `/cards/search?q=${encodeURIComponent(q)}&limit=8`,
       { signal },
     ),
-  scan: (imageBase64: string) =>
+  scan: (imageBase64: string, mode: "single" | "all" = "single") =>
     request<{ cards: ScannedCard[] }>(
       "/vision/scan",
-      postJson({ image: imageBase64, mode: "single" }),
+      postJson({ image: imageBase64, mode }),
     ),
 };

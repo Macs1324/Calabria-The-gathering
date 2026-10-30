@@ -104,6 +104,32 @@ candidate, and it appears on both screens. Use Discord or similar for voice
 and face cams; Calabria is the shared board. A plain, mid-tone playmat and
 unsleeved or clear-sleeved cards scan best.
 
+## Deploying to Fly.io
+
+`fly.toml` describes one small machine (512 MB, sleeps when idle) running
+`server/Dockerfile`, plus a 1 GB volume at `/data` for the card index and
+saved rooms. Fly provides the HTTPS the camera needs. One-time setup
+(`flyctl` is `nix shell nixpkgs#flyctl` on NixOS):
+
+```sh
+fly auth login
+fly apps create calabria-the-gathering         # or pick another name, and change `app` in fly.toml
+fly volumes create calabria_data --size 1 --region ams --yes
+fly deploy                                     # builds remotely; no local Docker needed
+
+# card data: build it locally (see above), then upload the two runtime files (~15 MB).
+# The first boot creates an empty cards.db; sftp won't overwrite it, so remove it first.
+fly ssh console -C "rm -f /data/cards.db /data/cards.db-wal /data/cards.db-shm /data/card_index.npz"
+fly ssh sftp put server/data/card_index.npz /data/card_index.npz
+fly ssh sftp put server/data/cards.db /data/cards.db
+fly machine restart                            # reload the index
+```
+
+Later updates are just `fly deploy`; the volume (index and rooms) is kept.
+After a card-index rebuild, repeat the rm / put / restart steps.
+
+Live instance: https://calabria-the-gathering.fly.dev
+
 ## Roadmap
 
 | # | Milestone | Status |
@@ -115,7 +141,8 @@ unsleeved or clear-sleeved cards scan best.
 | 3 | App: camera screen, snap → scan → confirm round trip | ✅ v0.2.0 (web client) |
 | 4 | Rooms WS sync, two clients in one room | ✅ v0.2.0 (+ seats, persistence, undo) |
 | 4.5 | Recognition v2: mat-difference + edge detection, full-card hashing, eval CLI | ✅ v0.2.0 |
-| 5 | Real-photo calibration, auto-tap from card rotation, card-back detection | next |
+| 5 | Hands-free: mat watch (auto-play, tap sync, departures), voice commands, UI polish | ✅ v0.3.0 |
+| 5.5 | Real-photo calibration, card-back detection | next |
 | 6 | Deck registration (cheat-proof scans), matchmaking, Tier-1 rules | later |
 
 Details and working decisions: [docs/architecture.md](docs/architecture.md).
