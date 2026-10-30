@@ -22,7 +22,7 @@ import httpx
 
 BULK_DATA_URL = "https://api.scryfall.com/bulk-data"
 ARTWORK_BULK_TYPE = "unique_artwork"
-USER_AGENT = "Calabria/0.1.0 (https://github.com/macs1324/Calabria)"
+USER_AGENT = "Calabria/0.2.0 (https://github.com/macs1324/Calabria)"
 
 
 @dataclass(frozen=True)
