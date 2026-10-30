@@ -1,5 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CardHit, Zone, api, cardImage } from "./api";
+import { Icon } from "./Icon";
+import { overlayOpen } from "./Menu";
+
+const ZONES: [Zone, string][] = [
+  ["battlefield", "Battlefield"],
+  ["graveyard", "Graveyard"],
+  ["exile", "Exile"],
+  ["command", "Command"],
+];
 
 export interface PlayOptions {
   zone: Zone;
@@ -20,6 +29,20 @@ export function AddCard({
   const [zone, setZone] = useState<Zone>("battlefield");
   const [token, setToken] = useState(false);
   const [tapped, setTapped] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // "/" jumps to the search from anywhere on the table.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (e.key !== "/" || target.closest("input, textarea, select")) return;
+      if (overlayOpen()) return;
+      e.preventDefault();
+      inputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -53,42 +76,41 @@ export function AddCard({
   };
 
   return (
-    <section className="panel add-card">
-      <div className="panel-head">
-        <h4>Play by name</h4>
+    <section className="dock-section add-card">
+      <h4>Play a card</h4>
+      <div className="segmented wide" role="group" aria-label="Play to">
+        {ZONES.map(([z, label]) => (
+          <button key={z} aria-pressed={zone === z} onClick={() => setZone(z)}>
+            {label}
+          </button>
+        ))}
       </div>
-      <div className="row options">
-        <select
-          value={zone}
-          onChange={(e) => setZone(e.currentTarget.value as Zone)}
+      <div className="row toggles">
+        <button
+          className="chip"
+          aria-pressed={token}
+          onClick={() => setToken((t) => !t)}
         >
-          <option value="battlefield">to battlefield</option>
-          <option value="graveyard">to graveyard</option>
-          <option value="exile">to exile</option>
-          <option value="command">to command zone</option>
-        </select>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={token}
-            onChange={(e) => setToken(e.currentTarget.checked)}
-          />{" "}
-          token
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={tapped}
-            disabled={zone !== "battlefield"}
-            onChange={(e) => setTapped(e.currentTarget.checked)}
-          />{" "}
-          tapped
-        </label>
+          {token && <Icon name="check" size={14} />}
+          Token
+        </button>
+        <button
+          className="chip"
+          aria-pressed={tapped && zone === "battlefield"}
+          disabled={zone !== "battlefield"}
+          onClick={() => setTapped((t) => !t)}
+        >
+          {tapped && zone === "battlefield" && <Icon name="check" size={14} />}
+          Tapped
+        </button>
       </div>
       <div className="search">
+        <Icon name="search" size={16} />
         <input
+          ref={inputRef}
           value={query}
-          placeholder="Type a card name… (e.g. light bo)"
+          aria-label="Card name"
+          placeholder="Search by name…"
           onChange={(e) => setQuery(e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
@@ -102,10 +124,12 @@ export function AddCard({
               // from a shorter query while the new search is in flight.
               play(hits[active]);
             } else if (e.key === "Escape") {
-              setQuery("");
+              if (query) setQuery("");
+              else e.currentTarget.blur();
             }
           }}
         />
+        {!query && <kbd className="search-key">/</kbd>}
         {hits.length > 0 && (
           <ul className="hits">
             {hits.map((h, i) => (

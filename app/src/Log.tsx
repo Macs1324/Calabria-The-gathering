@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import { GameState, LogEvent } from "./api";
+import { seatColor } from "./seats";
 
-/** Human-readable game log, newest at the bottom. */
+/** The game so far, newest at the bottom, a marker at every turn change. */
 export function Log({ log, state }: { log: LogEvent[]; state: GameState }) {
   const names = useMemo(() => cardNames(log, state), [log, state]);
   const endRef = useRef<HTMLLIElement>(null);
@@ -11,19 +12,55 @@ export function Log({ log, state }: { log: LogEvent[]; state: GameState }) {
     endRef.current?.scrollIntoView({ block: "nearest" });
   }, [log.length]);
 
+  const marks = turnMarks(log, state.turn.number);
   return (
-    <section className="panel log">
-      <h4>Log</h4>
+    <section className="dock-section log">
+      <h4>Activity</h4>
       <ol>
-        {log.map((e) => (
-          <li key={e.seq} className={e.type}>
-            {describe(e, names)}
-          </li>
-        ))}
+        {log.map((e) => {
+          const [who, text] = describe(e, names);
+          const item = (
+            <li key={e.seq} className={e.type}>
+              {who && (
+                <b style={{ color: seatColor(state.players, who) }}>{who}</b>
+              )}{" "}
+              {text}
+            </li>
+          );
+          if (!marks.has(e.seq)) return item;
+          const n = marks.get(e.seq);
+          return [
+            item,
+            <li key={`${e.seq}-mark`} className="turn-mark">
+              <span>{n === null ? "Next turn" : `Turn ${n}`}</span>
+            </li>,
+          ];
+        })}
         <li ref={endRef} className="end" />
       </ol>
     </section>
   );
+}
+
+/**
+ * The turn each turn_end / game_reset starts. The server sends only the tail
+ * of the log, so count back from the current turn instead of up from 1;
+ * before a reset in the window the numbers are unknown (null).
+ */
+export function turnMarks(log: LogEvent[], current: number): Map<number, number | null> {
+  const marks = new Map<number, number | null>();
+  let turn: number | null = current;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const e = log[i];
+    if (e.type === "turn_end") {
+      marks.set(e.seq, turn);
+      turn = turn === null ? null : turn - 1;
+    } else if (e.type === "game_reset") {
+      marks.set(e.seq, 1);
+      turn = null;
+    }
+  }
+  return marks;
 }
 
 function cardNames(log: LogEvent[], state: GameState): Map<number, string> {
@@ -43,43 +80,67 @@ function cardNames(log: LogEvent[], state: GameState): Map<number, string> {
   return names;
 }
 
-const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+const plural = (n: number, word: string) =>
+  `${n} ${word}${n === 1 ? "" : "s"}`;
 
-function describe(e: LogEvent, names: Map<number, string>): string {
+/** [who did it, what they did]: the name is drawn in its seat colour. */
+function describe(
+  e: LogEvent,
+  names: Map<number, string>,
+): [string | null, string] {
   const p = e.payload;
   const card = names.get(Number(p.entry)) ?? "a card";
   switch (e.type) {
     case "player_join":
-      return `${e.actor} sat down`;
+      return [e.actor, "sat down"];
     case "player_leave":
-      return `${e.actor} left`;
+      return [e.actor, "left the table"];
     case "card_play": {
       const where = p.zone && p.zone !== "battlefield" ? ` into ${p.zone}` : "";
-      return `${e.actor} played ${p.name ?? p.card_id}${p.token ? " (token)" : ""}${where}${p.tapped ? ", tapped" : ""}`;
+      return [
+        e.actor,
+        `played ${p.name ?? p.card_id}${p.token ? " (token)" : ""}${where}${p.tapped ? ", tapped" : ""}`,
+      ];
     }
     case "card_tap":
-      return `${e.actor} ${p.tapped ? "tapped" : "untapped"} ${card}`;
+      return [e.actor, `${p.tapped ? "tapped" : "untapped"} ${card}`];
     case "card_move":
-      return `${e.actor} moved ${card} to ${p.zone}`;
-    case "card_counter":
-      return `${e.actor}: ${signed(Number(p.delta))} ${p.kind} on ${card}`;
+      return [e.actor, `moved ${card} to ${p.zone}`];
+    case "card_counter": {
+      const n = Number(p.delta);
+      const counters = plural(Math.abs(n), `${p.kind} counter`);
+      return [
+        e.actor,
+        n >= 0 ? `put ${counters} on ${card}` : `removed ${counters} from ${card}`,
+      ];
+    }
     case "card_control":
-      return `${p.player} gained control of ${card}`;
+      return [String(p.player), `gained control of ${card}`];
     case "untap_all":
-      return `${e.actor} untapped everything`;
+      return [e.actor, "untapped everything"];
     case "life_change": {
-      const who = p.player && p.player !== e.actor ? `${p.player}'s` : "their";
-      return `${e.actor}: ${signed(Number(p.delta))} to ${who} life`;
+      const n = Number(p.delta);
+      if (!p.player || p.player === e.actor)
+        return [e.actor, `${n < 0 ? "lost" : "gained"} ${Math.abs(n)} life`];
+      return [
+        e.actor,
+        n < 0
+          ? `took ${-n} life from ${p.player}`
+          : `gave ${p.player} ${n} life`,
+      ];
     }
     case "phase_set":
-      return `${e.actor} → ${p.phase}`;
+      return [e.actor, `moved to ${p.phase}`];
     case "turn_end":
-      return `${e.actor} ended the turn`;
+      return [e.actor, "ended the turn"];
     case "dice_roll":
-      return `${e.actor} rolled ${p.result} on a d${p.sides}`;
+      return [e.actor, `rolled ${p.result} on a d${p.sides}`];
     case "game_reset":
-      return `${e.actor} started a new game (${p.starting_life ?? 20} life, ${p.first ?? "first seat"} starts)`;
+      return [
+        e.actor,
+        `started a new game (${p.starting_life ?? 20} life, ${p.first ?? "first seat"} starts)`,
+      ];
     default:
-      return `${e.actor}: ${e.type}`;
+      return [e.actor, e.type];
   }
 }

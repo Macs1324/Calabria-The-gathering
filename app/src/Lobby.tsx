@@ -34,7 +34,7 @@ export function Lobby({ onEnter }: { onEnter: (code: string) => void }) {
   return (
     <main className="lobby">
       <img className="logo" src="/logo.png" alt="Calabria: The Gathering" />
-      <p className="tagline">Paper Magic, over webcams, with friends.</p>
+      <p className="tagline">Paper Magic over webcams, with friends.</p>
 
       <section className="panel">
         <label>
@@ -47,36 +47,36 @@ export function Lobby({ onEnter }: { onEnter: (code: string) => void }) {
             onChange={(e) => setName(e.currentTarget.value)}
           />
         </label>
-        <div className="lobby-actions">
-          <button
-            className="primary"
-            disabled={busy || !name.trim()}
-            onClick={create}
-          >
-            Create a room
+        <button
+          className="primary wide"
+          disabled={busy || !name.trim()}
+          onClick={create}
+        >
+          Create a room
+        </button>
+        <div className="divider">or join a friend</div>
+        <form
+          className="join-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (code.trim()) {
+              if (name.trim()) rememberName(name.trim());
+              onEnter(code.trim());
+            }
+          }}
+        >
+          <input
+            className="code-input"
+            value={code}
+            maxLength={4}
+            aria-label="Room code"
+            placeholder="CODE"
+            onChange={(e) => setCode(e.currentTarget.value.toUpperCase())}
+          />
+          <button type="submit" disabled={!code.trim()}>
+            Join
           </button>
-          <form
-            className="row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (code.trim()) {
-                if (name.trim()) rememberName(name.trim());
-                onEnter(code.trim());
-              }
-            }}
-          >
-            <input
-              className="code-input"
-              value={code}
-              maxLength={4}
-              placeholder="CODE"
-              onChange={(e) => setCode(e.currentTarget.value.toUpperCase())}
-            />
-            <button type="submit" disabled={!code.trim()}>
-              Join
-            </button>
-          </form>
-        </div>
+        </form>
         {error && <p className="error">{error}</p>}
       </section>
 

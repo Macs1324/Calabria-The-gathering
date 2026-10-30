@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { storageGet, storageSet } from "./api";
+import { Icon } from "./Icon";
 import {
   Command,
   VoiceContext,
@@ -68,13 +69,23 @@ export function VoiceControl({
     return () => window.clearTimeout(t);
   }, [heard]);
 
+  useEffect(() => {
+    if (!error) return;
+    const t = window.setTimeout(() => setError(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [error]);
+
   if (!supported) {
     return (
-      <span
-        className="voice muted"
-        title="Voice commands need Chrome, Edge or Safari"
-      >
-        🎙 n/a
+      <span className="voice">
+        <button
+          className="icon-btn"
+          aria-label="Voice commands"
+          data-tip="Voice needs Chrome, Edge or Safari"
+          disabled
+        >
+          <Icon name="mic" />
+        </button>
       </span>
     );
   }
@@ -83,24 +94,28 @@ export function VoiceControl({
     <span className="voice">
       <button
         className={`mic ${on ? "live" : ""}`}
+        aria-label="Voice commands"
+        aria-pressed={on}
+        data-tip={on ? "Listening — click to stop" : "Turn on voice commands"}
         onClick={() => setOn((v) => !v)}
-        title={
-          on ? "Voice commands on — click to stop" : "Turn on voice commands"
-        }
       >
-        🎙 {on ? "Listening" : "Voice"}
+        <Icon name="mic" size={17} />
+        <span className="mic-label">{on ? "Listening" : "Voice"}</span>
       </button>
       <button
-        className="ghost help-btn"
+        className="icon-btn help-btn"
+        aria-label="What can I say?"
+        data-tip={help ? undefined : "What can I say?"}
         onClick={() => setHelp((h) => !h)}
-        title="What can I say?"
       >
-        ?
+        <Icon name="help" size={16} />
       </button>
       {heard && (
-        <span className={`heard ${heard.ok ? "ok" : ""}`}>“{heard.text}”</span>
+        <span className={`heard ${heard.ok ? "ok" : ""}`}>
+          {heard.ok && <Icon name="check" size={13} />}“{heard.text}”
+        </span>
       )}
-      {error && <span className="error small">{error}</span>}
+      {error && !heard && <span className="heard bad">{error}</span>}
       {help && (
         <div className="voice-help" onClick={() => setHelp(false)}>
           <strong>Say…</strong>
