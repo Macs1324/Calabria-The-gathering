@@ -9,8 +9,11 @@ NOTE: request models must live at module scope — with lazy annotations, a
 model defined inside a closure resolves as a query parameter instead of a body.
 
 Card data: the index and metadata store load from CALABRIA_DATA_DIR (default
-"data" relative to the working directory, built by scripts/build_card_index.py).
+"data" relative to the working directory, built by `calabria-build-index`).
 Missing artifacts degrade to an empty index.
+
+The web client (app/ `pnpm build`) is served at / when CALABRIA_WEB_DIR
+(default "../app/dist") holds an index.html: friends just open the URL.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from calabria.game.room import Room
@@ -61,12 +65,18 @@ def _relative_default_data_dir() -> Path:
     return Path(os.environ.get("CALABRIA_DATA_DIR", "data"))
 
 
+def _default_web_dir() -> Path:
+    # Quickstart runs from server/, next to the client's build output.
+    return Path(os.environ.get("CALABRIA_WEB_DIR", "../app/dist"))
+
+
 def create_app(
     *,
     room_store: RoomStore | None = None,
     card_index: CardIndex | None = None,
     meta_store: CardMetaStore | None = None,
     data_dir: Path | None = None,
+    web_dir: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Calabria: The Gathering",
@@ -82,6 +92,11 @@ def create_app(
         (row["card_id"], row["name"], row["set_code"]) for row in app.state.meta_store.all()
     )
     _mount_routes(app)
+    web_dir = web_dir if web_dir is not None else _default_web_dir()
+    if (web_dir / "index.html").exists():
+        # Mounted last so API routes win; the client routes with #/CODE, so
+        # no SPA fallback is needed.
+        app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
     return app
 
 
