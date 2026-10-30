@@ -10,7 +10,13 @@ import cv2
 import numpy as np
 from cardgen import CARD_H, CARD_W, fake_card, place
 
-from calabria.vision.detect import card_views, crop_hash_region, find_card_quads, order_corners, warp_card
+from calabria.vision.detect import (
+    card_views,
+    crop_hash_region,
+    find_card_quads,
+    order_corners,
+    warp_card,
+)
 from calabria.vision.index import embed_card
 from calabria.vision.phash import hamming
 

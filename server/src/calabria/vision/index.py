@@ -1,19 +1,39 @@
 """Card index: nearest-neighbor lookup over card image hashes.
 
-Milestone 0: an in-RAM dHash matrix with vectorized bit distance. Fine for
-prototype scale; will be replaced by an embedding index over Scryfall
-art crops (DINOv2/CLIP + FAISS) or a sqlite-vec store. TODO(milestone-1).
+Entries are 256-bit dHashes of a card-relative region (detect.HASH_REGION)
+of Scryfall's full-card images; queries hash the same region of a warped
+webcam crop. An in-RAM bit matrix with vectorized hamming distance answers a
+query over ~55k cards in a few milliseconds. The Embedder seam stays for an
+eventual learned embedding (DINOv2/CLIP + FAISS).
+
+Persisted indexes carry a `kind`; one built by an older pipeline loads as
+empty (rebuild with `calabria-build-index`) rather than answering garbage.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import cv2
 import numpy as np
 
+from calabria.vision.detect import CARD_H, CARD_W, crop_hash_region
 from calabria.vision.phash import dhash, hamming  # noqa: F401 (hamming re-export)
 
-_DEFAULT_WIDTH = 8  # 64-bit dHash, 8 bytes
+INDEX_KIND = "card-dhash16-v2"
+HASH_SIZE = 16
+_DEFAULT_WIDTH = HASH_SIZE * HASH_SIZE // 8  # 32 bytes
+
+log = logging.getLogger(__name__)
+
+
+def embed_card(card: np.ndarray) -> bytes:
+    """Hash an upright full-card image (any resolution, BGR or grayscale)."""
+    if card.ndim == 2:
+        card = cv2.cvtColor(card, cv2.COLOR_GRAY2BGR)
+    upright = cv2.resize(card, (CARD_W, CARD_H), interpolation=cv2.INTER_AREA)
+    return dhash(crop_hash_region(upright), size=HASH_SIZE)
 
 
 class Embedder:
@@ -23,9 +43,9 @@ class Embedder:
         raise NotImplementedError
 
 
-class DHashEmbedder(Embedder):
+class CardDHashEmbedder(Embedder):
     def embed(self, image: np.ndarray) -> bytes:
-        return dhash(image)
+        return embed_card(image)
 
 
 class CardIndex:
@@ -53,7 +73,7 @@ class CardIndex:
         self._ids.extend(ids)
 
     def add(self, card_id: str, image: np.ndarray) -> None:
-        self.add_hash(card_id, dhash(image))
+        self.add_hash(card_id, embed_card(image))
 
     def add_hash(self, card_id: str, hash_bytes: bytes) -> None:
         arr = np.frombuffer(hash_bytes, dtype=np.uint8)
@@ -68,12 +88,14 @@ class CardIndex:
         query = np.frombuffer(hash_bytes, dtype=np.uint8)
         xor = np.bitwise_xor(self._hashes, query)
         counts = np.unpackbits(xor, axis=1).sum(axis=1)
-        order = np.argsort(counts, kind="stable")[:k]
+        k = min(k, len(self._ids))
+        top = np.argpartition(counts, k - 1)[:k]
+        order = top[np.lexsort((top, counts[top]))]  # by distance, ties by insertion
         return [(self._ids[i], int(counts[i])) for i in order]
 
 
-def save_index(path: Path, index: CardIndex, *, kind: str = "dhash") -> None:
-    """Persist an index (binary NN-flat, dHash bytes today; vectors later)."""
+def save_index(path: Path, index: CardIndex, *, kind: str = INDEX_KIND) -> None:
+    """Persist an index (binary NN-flat: hash rows + ids + kind)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         path,
@@ -88,8 +110,11 @@ def load_index(path: Path) -> CardIndex:
     if not path.exists():
         return CardIndex()
     with np.load(path, allow_pickle=False) as npz:
-        width = int(npz["width"]) if "width" in npz.files else _DEFAULT_WIDTH
+        kind = str(npz["kind"]) if "kind" in npz.files else "dhash"
+        if kind != INDEX_KIND:
+            log.warning("card index %s is %r, expected %r: rebuild with calabria-build-index", path, kind, INDEX_KIND)
+            return CardIndex()
+        width = int(npz["width"])
         index = CardIndex(width=width)
-        make_array = npz["hashes"].astype(np.uint8).reshape(-1, width)
-        index._extend(make_array, [str(i) for i in npz["ids"]])
+        index._extend(npz["hashes"].astype(np.uint8).reshape(-1, width), [str(i) for i in npz["ids"]])
     return index

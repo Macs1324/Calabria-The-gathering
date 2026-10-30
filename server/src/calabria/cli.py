@@ -15,15 +15,15 @@ def build_card_index_cli() -> None:
         "--data-dir",
         type=Path,
         default=Path("data"),
-        help="directory holding bulk snapshot, art cache, cards.db, card_index.npz (default: ./data)",
+        help="directory holding bulk snapshot, card image cache, cards.db, card_index.npz (default: ./data)",
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="max number of art crops to download this run (default: all missing)",
+        help="max number of card images to download this run (default: all missing)",
     )
-    parser.add_argument("--concurrency", type=int, default=8, help="parallel art downloads")
+    parser.add_argument("--concurrency", type=int, default=8, help="parallel image downloads")
     args = parser.parse_args()
 
     stats = build_card_index(

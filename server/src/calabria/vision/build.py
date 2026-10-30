@@ -1,9 +1,8 @@
-"""Offline card index build: bulk snapshot -> metadata store -> art cache -> index.
+"""Offline card index build: bulk snapshot -> metadata store -> card images -> index.
 
-Run via `uv run python scripts/build_card_index.py` from server/ (or the
-console script once registered). Resumable: the JSONL snapshot and art cache
-are shared artifacts; re-runs only make one listing request and rebuild the
-persisted index from whatever crops exist on disk.
+Run via `uv run calabria-build-index` from server/. Resumable: the JSONL
+snapshot and image cache are shared artifacts; re-runs only make one listing
+request and rebuild the persisted index from whatever images exist on disk.
 """
 
 from __future__ import annotations
@@ -21,11 +20,12 @@ from calabria.scryfall.bulk import (
     read_jsonl_entries,
 )
 from calabria.scryfall.cards import CardMetaStore, parse_card_row
-from calabria.scryfall.images import art_cache_path, ensure_art_crops
-from calabria.vision.index import CardIndex, DHashEmbedder, Embedder, save_index
+from calabria.scryfall.images import card_cache_path, ensure_card_images
+from calabria.vision.index import CardDHashEmbedder, CardIndex, Embedder, save_index
 
 BULK_FILENAME = "unique_artwork.jsonl"
 INDEX_FILENAME = "card_index.npz"
+CACHE_DIRNAME = "card_cache"  # full-card "small" images (the old art_cache/ is unused)
 
 
 def build_card_index(
@@ -39,7 +39,7 @@ def build_card_index(
 ) -> dict[str, int]:
     data_dir.mkdir(parents=True, exist_ok=True)
     client = client or httpx.Client()
-    embedder = embedder or DHashEmbedder()
+    embedder = embedder or CardDHashEmbedder()
 
     bulk_path = data_dir / BULK_FILENAME
     listing = fetch_bulk_listing(client=client)
@@ -53,11 +53,11 @@ def build_card_index(
     store = meta_store or CardMetaStore(data_dir / "cards.db")
     store.upsert_many(rows)
 
-    cache_stats = ensure_art_crops(
-        rows, data_dir / "art_cache", client=client, limit=limit, concurrency=concurrency
+    cache_stats = ensure_card_images(
+        rows, data_dir / CACHE_DIRNAME, client=client, limit=limit, concurrency=concurrency
     )
 
-    index = _index_cached_rows(rows, data_dir / "art_cache", embedder)
+    index = _index_cached_rows(rows, data_dir / CACHE_DIRNAME, embedder)
     save_index(data_dir / INDEX_FILENAME, index)
 
     return {"meta_rows": len(rows), **cache_stats, "indexed": len(index)}
@@ -70,7 +70,7 @@ def _index_cached_rows(
 ) -> CardIndex:
     index = CardIndex()
     for row in rows:
-        path = art_cache_path(cache_dir, row["card_id"])
+        path = card_cache_path(cache_dir, row["card_id"])
         if not path.exists():  # not cached yet (e.g. capped build) — stay silent
             continue
         crop = cv2.imread(str(path))
