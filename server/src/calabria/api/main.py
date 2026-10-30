@@ -23,12 +23,14 @@ from typing import Any
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from calabria.game.room import Room
 from calabria.game.store import RoomStore
 from calabria.scryfall.cards import CardMetaStore
+from calabria.scryfall.search import IMAGE_VERSIONS, CardSearch, image_url
 from calabria.vision.build import load_persisted_index
 from calabria.vision.detect import crop_art_window, find_card_quads, warp_card
 from calabria.vision.index import CardIndex
@@ -73,6 +75,9 @@ def create_app(
     app.state.hub = Hub()
     app.state.card_index = card_index if card_index is not None else load_persisted_index(data_dir)
     app.state.meta_store = meta_store if meta_store is not None else CardMetaStore(data_dir / "cards.db")
+    app.state.card_search = CardSearch(
+        (row["card_id"], row["name"], row["set_code"]) for row in app.state.meta_store.all()
+    )
     _mount_routes(app)
     return app
 
@@ -101,6 +106,20 @@ def _mount_routes(app: FastAPI) -> None:
             )
         return {"cards": cards}
 
+    @app.get("/cards/search")
+    def card_search(q: str = "", limit: int = Query(default=8, ge=1, le=50)) -> dict[str, Any]:
+        return {"results": app.state.card_search.query(q, limit=limit)}
+
+    @app.get("/cards/{card_id}/image")
+    def card_image(card_id: str, version: str = "normal") -> RedirectResponse:
+        meta = app.state.meta_store.get(card_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail=f"unknown card {card_id!r}")
+        if version not in IMAGE_VERSIONS:
+            raise HTTPException(status_code=400, detail=f"version must be one of {IMAGE_VERSIONS}")
+        # Browsers cache the redirect; the CDN serves the bytes (no image proxying here).
+        return RedirectResponse(image_url(meta["art_crop_uri"], version), headers={"Cache-Control": "public, max-age=86400"})
+
     @app.post("/rooms", status_code=201)
     def create_room() -> dict[str, str]:
         return {"room_id": app.state.rooms.create().id}
@@ -125,7 +144,8 @@ def _mount_routes(app: FastAPI) -> None:
         room_id: str, req: RoomEvent, x_seat_token: str | None = Header(default=None)
     ) -> dict[str, Any]:
         room = _room(app, room_id)
-        snapshot = _guard(lambda: app.state.rooms.apply(room.id, x_seat_token, req.type, req.payload))
+        payload = _enrich(app, req.type, req.payload)
+        snapshot = _guard(lambda: app.state.rooms.apply(room.id, x_seat_token, req.type, payload))
         await app.state.hub.broadcast(app, room.id)
         return snapshot
 
@@ -210,11 +230,21 @@ def _ws_op(app: FastAPI, room_id: str, token: str | None, msg: Any) -> None:
         payload = msg.get("payload") or {}
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="payload must be an object")
-        _guard(lambda: app.state.rooms.apply(room_id, token, str(msg.get("type")), payload))
+        event_type = str(msg.get("type"))
+        payload = _enrich(app, event_type, payload)
+        _guard(lambda: app.state.rooms.apply(room_id, token, event_type, payload))
     elif op == "undo":
         _guard(lambda: app.state.rooms.undo(room_id, token))
     else:
         raise HTTPException(status_code=400, detail=f"unknown op {op!r}")
+
+
+def _enrich(app: FastAPI, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Stamp the card name onto plays server-side, so logs and boards read well."""
+    if event_type != "card_play" or payload.get("name"):
+        return payload
+    meta = app.state.meta_store.get(str(payload.get("card_id", "")))
+    return {**payload, "name": meta["name"]} if meta else payload
 
 
 def _guard(action: Any) -> Any:
