@@ -50,14 +50,15 @@ def test_health():
 
 def test_unknown_room_404():
     assert client().get("/rooms/nope").status_code == 404
-    assert client().post("/rooms/nope/events", json={"type": "card_play", "actor": "al"}).status_code == 404
+    assert client().post("/rooms/nope/events", json={"type": "card_play"}).status_code == 404
+    assert client().post("/rooms/nope/join", json={"name": "al"}).status_code == 404
 
 
 def test_room_play_round_trip():
     c = client()
     room_id = c.post("/rooms").json()["room_id"]
-    c.post(f"/rooms/{room_id}/events", json={"type": "player_join", "actor": "al"})
-    c.post(f"/rooms/{room_id}/events", json={"type": "card_play", "actor": "al", "payload": {"card_id": "isle"}})
+    token = c.post(f"/rooms/{room_id}/join", json={"name": "al"}).json()["token"]
+    c.post(f"/rooms/{room_id}/events", headers={"X-Seat-Token": token}, json={"type": "card_play", "payload": {"card_id": "isle"}})
     snap = c.get(f"/rooms/{room_id}").json()
     (entry,) = snap["battlefield"]
     assert entry["card_id"] == "isle"
@@ -69,9 +70,10 @@ def test_room_play_round_trip():
 def test_invalid_event_400_with_message():
     c = client()
     room_id = c.post("/rooms").json()["room_id"]
-    res = c.post(f"/rooms/{room_id}/events", json={"type": "card_play", "actor": "ghost", "payload": {"card_id": "x"}})
+    token = c.post(f"/rooms/{room_id}/join", json={"name": "al"}).json()["token"]
+    res = c.post(f"/rooms/{room_id}/events", headers={"X-Seat-Token": token}, json={"type": "card_tap", "payload": {"entry": 7, "tapped": True}})
     assert res.status_code == 400
-    assert "not seated" in res.json()["detail"]
+    assert "no battlefield entry" in res.json()["detail"]
 
 
 def test_scan_empty_index_returns_no_candidates():

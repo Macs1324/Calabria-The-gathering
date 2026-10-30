@@ -1,8 +1,9 @@
 """FastAPI surface: health, card scan, and tier-0 room REST endpoints.
 
-Tier-0 rooms live in one process (a dict). The game state itself is already
-event-sourced (see calabria.game.room), so swapping this for a durable store
-later is a mechanical change. TODO(milestone-4): WebSocket sync per room.
+Rooms live in a RoomStore (one JSON log per room under CALABRIA_DATA_DIR/rooms).
+Seat tokens identify players: REST calls send `X-Seat-Token`, WebSockets pass
+`?token=`. Every change is broadcast as a full "view" to the room's sockets —
+rooms are small, so clients just re-render instead of patching.
 
 NOTE: request models must live at module scope — with lazy annotations, a
 model defined inside a closure resolves as a query parameter instead of a body.
@@ -14,18 +15,19 @@ Missing artifacts degrade to an empty index.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
-import uuid
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from calabria.game.room import Room
+from calabria.game.store import RoomStore
 from calabria.scryfall.cards import CardMetaStore
 from calabria.vision.build import load_persisted_index
 from calabria.vision.detect import crop_art_window, find_card_quads, warp_card
@@ -39,8 +41,15 @@ class ScanRequest(BaseModel):
 
 class RoomEvent(BaseModel):
     type: str
-    actor: str
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class JoinRequest(BaseModel):
+    name: str
+    token: str | None = None
+
+
+LOG_TAIL = 200  # events sent with each view; the full log stays on the server
 
 
 def _relative_default_data_dir() -> Path:
@@ -49,7 +58,7 @@ def _relative_default_data_dir() -> Path:
 
 def create_app(
     *,
-    rooms: dict[str, Room] | None = None,
+    room_store: RoomStore | None = None,
     card_index: CardIndex | None = None,
     meta_store: CardMetaStore | None = None,
     data_dir: Path | None = None,
@@ -60,7 +69,8 @@ def create_app(
         description="Camera-driven MTG dueling platform",
     )
     data_dir = data_dir if data_dir is not None else _relative_default_data_dir()
-    app.state.rooms = rooms if rooms is not None else {}
+    app.state.rooms = room_store if room_store is not None else RoomStore(data_dir / "rooms")
+    app.state.hub = Hub()
     app.state.card_index = card_index if card_index is not None else load_persisted_index(data_dir)
     app.state.meta_store = meta_store if meta_store is not None else CardMetaStore(data_dir / "cards.db")
     _mount_routes(app)
@@ -93,21 +103,128 @@ def _mount_routes(app: FastAPI) -> None:
 
     @app.post("/rooms", status_code=201)
     def create_room() -> dict[str, str]:
-        room_id = uuid.uuid4().hex[:12]
-        app.state.rooms[room_id] = Room(room_id)
-        return {"room_id": room_id}
+        return {"room_id": app.state.rooms.create().id}
 
     @app.get("/rooms/{room_id}")
     def room_snapshot(room_id: str) -> dict[str, Any]:
         return _room(app, room_id).snapshot()
 
-    @app.post("/rooms/{room_id}/events")
-    def room_event(room_id: str, req: RoomEvent) -> dict[str, Any]:
+    @app.post("/rooms/{room_id}/join")
+    async def join_room(room_id: str, req: JoinRequest) -> dict[str, str]:
         room = _room(app, room_id)
         try:
-            return room.apply(req.type, req.actor, req.payload)
+            token = app.state.rooms.join(room.id, req.name, token=req.token)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+            status = 409 if "taken" in str(e) else 400
+            raise HTTPException(status_code=status, detail=str(e)) from e
+        await app.state.hub.broadcast(app, room.id)
+        return {"room_id": room.id, "name": req.name.strip(), "token": token}
+
+    @app.post("/rooms/{room_id}/events")
+    async def room_event(
+        room_id: str, req: RoomEvent, x_seat_token: str | None = Header(default=None)
+    ) -> dict[str, Any]:
+        room = _room(app, room_id)
+        snapshot = _guard(lambda: app.state.rooms.apply(room.id, x_seat_token, req.type, req.payload))
+        await app.state.hub.broadcast(app, room.id)
+        return snapshot
+
+    @app.post("/rooms/{room_id}/undo")
+    async def room_undo(room_id: str, x_seat_token: str | None = Header(default=None)) -> dict[str, Any]:
+        room = _room(app, room_id)
+        snapshot = _guard(lambda: app.state.rooms.undo(room.id, x_seat_token))
+        await app.state.hub.broadcast(app, room.id)
+        return snapshot
+
+    @app.websocket("/rooms/{room_id}/ws")
+    async def room_ws(ws: WebSocket, room_id: str, token: str | None = None) -> None:
+        room = app.state.rooms.get(room_id)
+        if room is None:
+            await ws.close(code=4404, reason="unknown room")
+            return
+        await ws.accept()
+        you = app.state.rooms.seat_of(room.id, token)
+        hub: Hub = app.state.hub
+        hub.add(room.id, ws, you)
+        try:
+            await hub.broadcast(app, room.id)  # newcomer gets a view; others see presence
+            while True:
+                msg = await ws.receive_json()
+                try:
+                    _ws_op(app, room.id, token, msg)
+                except HTTPException as e:
+                    await ws.send_json({"kind": "error", "detail": e.detail})
+                    continue
+                await hub.broadcast(app, room.id)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            hub.remove(room.id, ws)
+            await hub.broadcast(app, room.id)
+
+
+class Hub:
+    """Open room sockets and who they belong to (None = spectator)."""
+
+    def __init__(self) -> None:
+        self._sockets: dict[str, dict[WebSocket, str | None]] = {}
+
+    def add(self, room_id: str, ws: WebSocket, seat: str | None) -> None:
+        self._sockets.setdefault(room_id, {})[ws] = seat
+
+    def remove(self, room_id: str, ws: WebSocket) -> None:
+        self._sockets.get(room_id, {}).pop(ws, None)
+
+    def online(self, room_id: str, players: list[str]) -> list[str]:
+        seats = set(self._sockets.get(room_id, {}).values())
+        return [p for p in players if p in seats]  # seat order, not connect order
+
+    async def broadcast(self, app: FastAPI, room_id: str) -> None:
+        sockets = dict(self._sockets.get(room_id, {}))
+        if not sockets:
+            return
+        room = app.state.rooms.get(room_id)
+        state = room.snapshot()
+        base = {
+            "kind": "view",
+            "room_id": room_id,
+            "state": state,
+            "log": [
+                {"seq": e.seq, "type": e.type, "actor": e.actor, "payload": e.payload}
+                for e in room.events[-LOG_TAIL:]
+            ],
+            "online": self.online(room_id, state["players"]),
+        }
+        results = await asyncio.gather(
+            *(ws.send_json({**base, "you": seat}) for ws, seat in sockets.items()),
+            return_exceptions=True,
+        )
+        for ws, result in zip(sockets, results, strict=True):
+            if isinstance(result, Exception):  # half-closed socket; its handler cleans up too
+                self.remove(room_id, ws)
+
+
+def _ws_op(app: FastAPI, room_id: str, token: str | None, msg: Any) -> None:
+    op = msg.get("op") if isinstance(msg, dict) else None
+    if op == "event":
+        payload = msg.get("payload") or {}
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="payload must be an object")
+        _guard(lambda: app.state.rooms.apply(room_id, token, str(msg.get("type")), payload))
+    elif op == "undo":
+        _guard(lambda: app.state.rooms.undo(room_id, token))
+    else:
+        raise HTTPException(status_code=400, detail=f"unknown op {op!r}")
+
+
+def _guard(action: Any) -> Any:
+    """Map store errors onto HTTP errors (also reused as WS error messages)."""
+    try:
+        return action()
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def _describe(app: FastAPI, card_id: str, distance: int) -> dict[str, Any]:
