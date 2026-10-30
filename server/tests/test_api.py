@@ -158,3 +158,27 @@ def test_no_web_client_is_fine(tmp_path):
     c = TestClient(create_app(web_dir=tmp_path / "missing"))
     assert c.get("/").status_code == 404
     assert c.get("/health").status_code == 200
+
+
+# --- confidence: what hands-free mode may auto-play ------------------------------
+
+
+def test_clear_match_is_confident():
+    res = TestClient(seeded_app()).post("/vision/scan", json={"image": encode(place(fake_card(4), angle=5))})
+    assert res.json()["cards"][0]["confident"] is True
+
+
+def test_lookalike_cards_are_not_confident():
+    # the same art under two names: no margin over the runner-up
+    app = seeded_app()
+    app.state.card_index.add("twin", fake_card(4))
+    names = {"card-4": "Original", "twin": "Twin"}
+    app.state.meta_store.upsert_many([{"card_id": c, "name": n, "set_code": "t", "art_crop_uri": "u"} for c, n in names.items()])
+    res = TestClient(app).post("/vision/scan", json={"image": encode(place(fake_card(4)))})
+    assert res.json()["cards"][0]["confident"] is False
+
+
+def test_unknown_card_is_not_confident():
+    res = TestClient(seeded_app()).post("/vision/scan", json={"image": encode(place(fake_card(99)))})
+    (card,) = res.json()["cards"]
+    assert card["confident"] is False
