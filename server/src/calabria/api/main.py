@@ -55,7 +55,7 @@ def create_app(
     data_dir: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
-        title="Calabria",
+        title="Calabria: The Gathering",
         version="0.1.0",
         description="Camera-driven MTG dueling platform",
     )

@@ -1,4 +1,6 @@
-# Calabria
+# Calabria: The Gathering
+
+<p align="center"><img src="app/public/logo.png" alt="Calabria: The Gathering" width="600"></p>
 
 Camera-driven Magic: The Gathering dueling platform. Play real, physical cards;
 the desktop app watches your playmat over a webcam, recognizes what you played,

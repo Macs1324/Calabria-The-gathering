@@ -26,7 +26,7 @@ export default function App() {
 
   return (
     <main className="container">
-      <h1>Calabria</h1>
+      <h1>Calabria: The Gathering</h1>
       <p className="subtitle">camera-driven MTG duels</p>
 
       <form

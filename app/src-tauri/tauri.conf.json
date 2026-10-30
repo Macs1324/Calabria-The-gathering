@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Calabria",
+  "productName": "Calabria: The Gathering",
   "version": "0.1.0",
   "identifier": "app.calabria",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Calabria — camera MTG duels",
+        "title": "Calabria: The Gathering",
         "width": 1280,
         "height": 820
       }
