@@ -29,6 +29,7 @@ packages = ["src/calabria"]
 
 [project.scripts]
 calabria-build-index = "calabria.cli:build_card_index_cli"
+calabria-eval-scan = "calabria.cli:eval_scan_cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

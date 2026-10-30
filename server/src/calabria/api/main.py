@@ -19,7 +19,7 @@ import asyncio
 import base64
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import numpy as np
@@ -30,15 +30,18 @@ from pydantic import BaseModel, Field
 from calabria.game.room import Room
 from calabria.game.store import RoomStore
 from calabria.scryfall.cards import CardMetaStore
-from calabria.scryfall.search import IMAGE_VERSIONS, CardSearch, image_url
+from calabria.scryfall.images import IMAGE_VERSIONS, image_url
+from calabria.scryfall.search import CardSearch
 from calabria.vision.build import load_persisted_index
-from calabria.vision.detect import crop_art_window, find_card_quads, warp_card
 from calabria.vision.index import CardIndex
-from calabria.vision.phash import dhash
+from calabria.vision.scan import scan_frame
 
 
 class ScanRequest(BaseModel):
     image: str = Field(description="base64-encoded PNG/JPEG frame")
+    mode: Literal["all", "single"] = Field(
+        default="all", description="'single': only the largest card (hold-it-up-to-the-camera scans)"
+    )
 
 
 class RoomEvent(BaseModel):
@@ -90,20 +93,7 @@ def _mount_routes(app: FastAPI) -> None:
     @app.post("/vision/scan")
     def scan(req: ScanRequest) -> dict[str, Any]:
         frame = _decode_image(req.image)
-        cards = []
-        for quad in find_card_quads(frame):
-            # Webcam cards wear borders and name bars; hash only the art window
-            # so the warp aligns with Scryfall art_crop index entries.
-            art = crop_art_window(warp_card(frame, quad))
-            hash_bytes = dhash(art)
-            candidates = [_describe(app, card_id, distance) for card_id, distance in app.state.card_index.search(hash_bytes, k=3)]
-            cards.append(
-                {
-                    "quad": np.asarray(quad).round(1).tolist(),
-                    "candidates": candidates,
-                    "best": candidates[0] if candidates else None,
-                }
-            )
+        cards = scan_frame(frame, app.state.card_index, app.state.meta_store.get, single=req.mode == "single")
         return {"cards": cards}
 
     @app.get("/cards/search")
@@ -255,16 +245,6 @@ def _guard(action: Any) -> Any:
         raise HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-def _describe(app: FastAPI, card_id: str, distance: int) -> dict[str, Any]:
-    meta = app.state.meta_store.get(card_id)
-    return {
-        "card_id": card_id,
-        "distance": distance,
-        "name": meta["name"] if meta else None,
-        "set_code": meta["set_code"] if meta else None,
-    }
 
 
 def _room(app: FastAPI, room_id: str) -> Room:

@@ -56,15 +56,20 @@ pnpm tauri dev
 
 ```sh
 cd server
-uv run calabria-build-index                     # full index (~55k crops, resumable)
+uv run calabria-build-index                     # full index (~55k images, ~2-3 min, resumable)
 uv run calabria-build-index --limit 2000        # capped run for a quick start
 ```
 
 Artifacts land in `server/data/` (override with `CALABRIA_DATA_DIR`): the
-unique-artwork JSONL snapshot, a sharded art cache, `cards.db` (names/sets),
-and `card_index.npz` (the retrieval index `/vision/scan` queries). Re-runs
-are cheap: one listing request per refresh, art crops already cached stay on
-disk.
+unique-artwork JSONL snapshot, a sharded card-image cache (~750 MB),
+`cards.db` (names/sets), and `card_index.npz` (the retrieval index
+`/vision/scan` queries). Re-runs are cheap: one listing request per refresh,
+images already cached stay on disk. An index built before v0.2 is ignored
+(with a warning) until rebuilt; the old `art_cache/` folder can be deleted.
+
+Measure recognition with `uv run calabria-eval-scan --synthetic 400`, or
+better, on photos of your own cards: `--photos DIR` with files named after
+the card (`Lightning Bolt.jpg`, `Lightning Bolt 2.jpg`).
 
 ## Server container
 

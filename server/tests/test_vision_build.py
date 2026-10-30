@@ -1,8 +1,8 @@
-"""Spec for the offline index build: bulk -> metadata store -> art cache -> persisted index.
+"""Spec for the offline index build: bulk -> metadata store -> card image cache -> index.
 
 The build is resumable and capped (`limit`), so a real run can be chunked;
-the persisted index keeps dHash (8-byte) rows behind an Embedder seam for
-the future embedding swap.
+the persisted index keeps card dHash (32-byte) rows behind an Embedder seam
+for a future embedding swap.
 """
 
 import base64
@@ -11,14 +11,13 @@ from pathlib import Path
 import cv2
 import httpx
 import numpy as np
+from cardgen import fake_card, place
 from fastapi.testclient import TestClient
 
 from calabria.api.main import create_app
 from calabria.scryfall.cards import CardMetaStore
 from calabria.vision.build import build_card_index, load_persisted_index
-from calabria.vision.detect import ART_WINDOW
-from calabria.vision.index import CardIndex
-from calabria.vision.phash import dhash
+from calabria.vision.index import CardIndex, embed_card
 
 ART_BYTES = b"fake-art-jpeg"  # unused placeholder kept for the docstring
 
@@ -62,23 +61,9 @@ def make_client(counter: dict[str, int]) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(responder))
 
 
-def synthetic_art(h: int, w: int) -> np.ndarray:
-    _yy, xx = np.mgrid[0:h, 0:w]
-    return (130 + (xx * 100 // max(w - 1, 1))).astype(np.uint8)
-
-
-def synthetic_frame() -> bytes:
-    """A bright art inside a white full-card frame on a dark mat (real-card geometry)."""
-    frame = np.full((800, 960, 3), 35, np.uint8)
-    art = synthetic_art(300, 200)
-    x0, y0, x1, y1 = ART_WINDOW
-    h_card = int(300 / (y1 - y0))
-    w_card = int(200 / (x1 - x0))
-    card = np.full((h_card, w_card, 3), 235, np.uint8)
-    card[int(y0 * h_card) : int(y0 * h_card) + 300, int(x0 * w_card) : int(x0 * w_card) + 200] = cv2.cvtColor(art, cv2.COLOR_GRAY2BGR)
-    cx, cy = (960 - w_card) // 2, (800 - h_card) // 2
-    frame[cy : cy + h_card, cx : cx + w_card] = card
-    ok, buf = cv2.imencode(".png", frame)
+def synthetic_frame() -> str:
+    """fake_card(3) lying slightly rotated on a mat, base64 PNG."""
+    ok, buf = cv2.imencode(".png", place(fake_card(3), angle=7))
     assert ok
     return base64.b64encode(buf).decode()
 
@@ -95,7 +80,7 @@ def test_build_from_bulk(tmp_path):
     assert stats["cached"] == 0
     assert stats["failed"] == 0
     assert stats["indexed"] == 2
-    assert counter["requests"] == 4  # listing + jsonl + 2 art
+    assert counter["requests"] == 4  # listing + jsonl + 2 card images
 
     store = CardMetaStore(tmp_path / "cards.db")
     assert store.count() == 2
@@ -125,9 +110,9 @@ def test_persisted_roundtrip_exact_match(tmp_path):
     index = load_persisted_index(tmp_path)
 
     crop_path = (
-        tmp_path / "art_cache" / "a2" / "a2b1c0d9-0000-0000-0000-000000000009.jpg"
+        tmp_path / "card_cache" / "a2" / "a2b1c0d9-0000-0000-0000-000000000009.jpg"
     )
-    query = dhash(cv2.imread(str(crop_path)))
+    query = embed_card(cv2.imread(str(crop_path)))
     results = index.search(query, k=1)
     assert results[0][0] == "a2b1c0d9-0000-0000-0000-000000000009"
     assert results[0][1] == 0
@@ -137,14 +122,15 @@ def test_load_persisted_index_missing_dir(tmp_path):
     index = load_persisted_index(tmp_path / "never-built")
     assert isinstance(index, CardIndex)
     assert len(index) == 0
-    assert index.search(dhash(np.zeros((200, 200), np.uint8)), k=3) == []
+    assert index.search(embed_card(np.zeros((440, 315, 3), np.uint8)), k=3) == []
 
 
 def test_scan_route_joins_names(tmp_path):
     """The scan endpoint enriches candidates with names from the metadata store."""
     app = create_app(data_dir=tmp_path)
-    art = synthetic_art(300, 200)
-    app.state.card_index.add("sentinel", art)
+    app.state.card_index.add("sentinel", fake_card(3))
+    for seed in range(10, 20):
+        app.state.card_index.add(f"other-{seed}", fake_card(seed))
     app.state.meta_store.upsert_many(
         [{"card_id": "sentinel", "name": "Mana Castle", "set_code": "big", "art_crop_uri": "u"}]
     )
@@ -156,4 +142,4 @@ def test_scan_route_joins_names(tmp_path):
     best = cards[0]["best"]
     assert best["card_id"] == "sentinel"
     assert best["name"] == "Mana Castle"
-    assert best["distance"] == 0
+    assert best["distance"] <= 40

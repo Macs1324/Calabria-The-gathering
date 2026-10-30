@@ -1,4 +1,4 @@
-"""Card name search over the local metadata store, plus CDN image URLs.
+"""Card name search over the local metadata store.
 
 Manual entry is a first-class input: typing "light bo" must find Lightning
 Bolt. The ~35k distinct names fit comfortably in memory, so search is a
@@ -17,20 +17,12 @@ import unicodedata
 from collections.abc import Iterable
 
 _NON_ALNUM = re.compile(r"[^0-9a-z]+")
-IMAGE_VERSIONS = ("small", "normal", "large", "png", "art_crop", "border_crop")
 
 
 def normalize(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", text)
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return _NON_ALNUM.sub(" ", stripped.casefold()).strip()
-
-
-def image_url(art_crop_uri: str, version: str = "normal") -> str:
-    """Scryfall CDN paths differ only by the version segment."""
-    if version not in IMAGE_VERSIONS:
-        raise ValueError(f"unknown image version {version!r}")
-    return art_crop_uri.replace("/art_crop/", f"/{version}/", 1)
 
 
 class CardSearch:
