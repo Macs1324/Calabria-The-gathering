@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CardEntry, GameState, Zone, cardImage } from "./api";
 import { RoomActions } from "./useRoom";
 
@@ -29,8 +29,13 @@ export function Board({
   onPreview: (card: CardEntry | null) => void;
   send: RoomActions["send"];
 }) {
-  const [open, setOpen] = useState<Zone | null>(null);
+  const [picked, setOpen] = useState<Zone | null>(null);
   const mine = player === you;
+  // A pile that emptied closes itself (its button is disabled at 0).
+  const open = picked && state[picked].some((c) => c.owner === player) ? picked : null;
+  useEffect(() => {
+    if (picked && !open) setOpen(null); // …and stays closed when refilled
+  }, [picked, open]);
   const battlefield = state.battlefield.filter((c) => c.controller === player);
   const active = state.turn.player === player;
 
@@ -148,7 +153,10 @@ function CardTile({
     <div
       className={`card ${small ? "small" : ""} ${card.tapped ? "tapped" : ""} ${selected ? "selected" : ""}`}
       title={`${card.name ?? card.card_id}${card.owner !== card.controller ? ` (owned by ${card.owner})` : ""}`}
-      onClick={() => onSelect?.(card.entry_seq)}
+      onClick={(e) => {
+        if (e.detail > 1) return; // second click of a double-click taps, not deselects
+        onSelect?.(card.entry_seq);
+      }}
       onDoubleClick={onToggleTap}
       onMouseEnter={() => onPreview(card)}
     >
