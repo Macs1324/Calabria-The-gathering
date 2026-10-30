@@ -59,13 +59,15 @@ def download_bulk_file(
     client: httpx.Client | None = None,
 ) -> Path:
     """Stream a bulk JSONL file to `dest` (CDN, no API rate limit applies)."""
-    with client or httpx.Client() as c:  # pragma: no cover - http plumbing
-        with c.stream("GET", download_uri, headers={"User-Agent": USER_AGENT}) as response:
-            response.raise_for_status()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with dest.open("wb") as fh:
-                for chunk in response.iter_bytes():
-                    fh.write(chunk)
+    with (
+        client or httpx.Client() as c,  # pragma: no cover - http plumbing
+        c.stream("GET", download_uri, headers={"User-Agent": USER_AGENT}) as response,
+    ):
+        response.raise_for_status()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("wb") as fh:
+            for chunk in response.iter_bytes():
+                fh.write(chunk)
     return dest
 
 
