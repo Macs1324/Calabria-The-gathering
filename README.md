@@ -61,10 +61,10 @@ docker run -p 8000:8000 calabria-server
 
 | # | Milestone | Status |
 |---|-----------|--------|
-| 0 | Repo skeleton, toolchain, Dockerfile, docs | **this commit** |
-| 1 | Vision core: quads → warp → dHash index → top-3 candidates | next |
-| 2 | Server: `/vision/scan` + rooms REST + event log | next |
-| 3 | App: camera screen, snap → scan → confirm round trip | next |
+| 0 | Repo skeleton, toolchain, Dockerfile, docs | ✅ landed |
+| 1 | Vision core: quads → warp → dHash index → top-3 candidates | ✅ (dHash stand-in; Scryfall embedding index next) |
+| 2 | Server: `/vision/scan` + rooms REST + event log | ✅ |
+| 3 | App: camera screen, snap → scan → confirm round trip | in progress (shell scaffolded) |
 | 4 | Rooms WS sync, two clients in one room | later |
 | 5 | Auto-tap from card rotation, card-back detection | later |
 | 6 | Deck registration (cheat-proof scans), matchmaking, Tier-1 rules | later |
