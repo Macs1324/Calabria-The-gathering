@@ -17,6 +17,14 @@ from calabria.vision.index import CardIndex, embed_card
 CANDIDATES = 3
 _SEARCH_DEPTH = 12  # nearest arts searched to find CANDIDATES distinct names
 
+# "Confident" = safe to play without asking (hands-free mode). Calibrated on
+# 751 synthetic webcam scans against the 55k index (2026-10-30): wrong top
+# guesses sit at distance >= ~56 with a gap <= ~12 to the runner-up, so
+# best <= 50 and gap >= 12 auto-played 79% of scans with 0 wrong. Everything
+# else still gets the one-tap confirm.
+CONFIDENT_MAX_DISTANCE = 50
+CONFIDENT_MIN_GAP = 12
+
 # card_id -> {"name": ..., "set_code": ...} or None when unknown
 Lookup = Callable[[str], dict[str, Any] | None]
 
@@ -34,12 +42,17 @@ def scan_frame(frame: np.ndarray, index: CardIndex, lookup: Lookup, *, single: b
             key=lambda found: found[0][1] if found else 1 << 30,
         )
         candidates = _distinct_names([_describe(lookup, cid, dist) for cid, dist in hits])[:CANDIDATES]
+        best = candidates[0]["distance"] if candidates else None
+        runner_up = candidates[1]["distance"] if len(candidates) > 1 else 256
         cards.append(
             {
                 "quad": np.asarray(quad).round(1).tolist(),
                 "tapped": tapped,
                 "candidates": candidates,
                 "best": candidates[0] if candidates else None,
+                "confident": best is not None
+                and best <= CONFIDENT_MAX_DISTANCE
+                and runner_up - best >= CONFIDENT_MIN_GAP,
             }
         )
     return cards
