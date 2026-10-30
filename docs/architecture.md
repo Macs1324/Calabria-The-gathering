@@ -14,21 +14,41 @@ anything else drifts out of date.
 +-------------------+        +------------------------------+
                                       |
                                       v
-                              Scryfall bulk data (card metadata + art vectors)
-                              prebuilt at build/boot time, cached on disk
+                     card data (built offline by scripts/cli: calabria-build-index)
+                     1. Scryfall /bulk-data listing (1 API call per refresh)
+                     2. unique_artwork.tar.gz JSONL snapshot (~39 MB, one row per distinct art)
+                     3. art crops from cards.scryfall.io CDN (no rate limit, cached on disk)
+                     4. index artifact: card_index.npz + cards.db (CALABRIA_DATA_DIR)
 ```
+
+## Scryfall usage split (verified against their docs)
+
+- `/vision/scan` never touches api.scryfall.com: candidates and names come
+  from the local snapshot. Rules: User-Agent header, honor 429 (30s cooldown),
+  cache data >= 24h — satisfied by construction.
+- Build-time: `/bulk-data` listing then CDN art crops.
+- Runtime remaining: `/cards/named?fuzzy=` as OCR fallback (milestone-6), and
+  `/cards/collection` for deck registration.
 
 ## Recognition pipeline (milestones 1–2)
 
-1. **Detect** classic OpenCV: Canny → contours → quadrilateral → perspective
-   warp to a clean upright crop (63:88). No training needed; upgrade path is a
-   YOLO-nano detector on synthetic composites.
-2. **Identify** by retrieval: dHash first (fast, close-match), then embedding
-   (DINOv2/CLIP over Scryfall `art_crop`, index in RAM ~100MB). A "classifier"
-   over >100k classes loses to a nearest-neighbor retrieval; we classify by lookup.
-3. **Confirm** the client shows top-3 candidates as a one-tap modal. This
-   absorbs reprints, glare, and low-confidence matches into cheap human input,
-   and each confirm is logged as an event.
+1. **Detect** classic OpenCV: Otsu threshold (bright card blobs on dark mats)
+   → quadrilateral contours → perspective warp to a clean upright 63:88 crop.
+   Edge detectors (Canny) were tried and are corner-brittle on solid fills.
+   A physical card's white frame is what carries detection — bare art on a
+   mat does not separate. Upgrade path for noisy frames: YOLO-nano on
+   synthetic composites.
+2. **Hash only the art window** (`ART_WINDOW` inset ≈ 68% of card side) so a
+   webcam view of a full physical card aligns with Scryfall `art_crop`
+   index entries. Fractions are an approximation of modern frames —
+   calibrate with real photographs (TODO in milestone 3).
+3. **Identify** by retrieval. dHash matrix is the current stand-in
+   (in-RAM, `card_index.npz`), with an `Embedder` seam for the swap to
+   DINOv2/CLIP embeddings + FAISS. QA on real art with webcam-like
+   perturbations: rank-1 ≈ 67%, top-3 ≈ 78% (dHash stage) — the top-3 + tap
+   confirm UI lives specifically to absorb that.
+4. **Confirm** the client shows top-3 candidate cards as a one-tap modal.
+   Every confirm becomes an event log entry.
 
 ## Game state (tier 0)
 
