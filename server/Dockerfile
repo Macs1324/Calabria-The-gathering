@@ -1,4 +1,4 @@
-# Calabria server image.
+# Calabria: The Gathering — server image.
 #
 # Build from the repository root:
 #   docker build -t calabria-server -f server/Dockerfile .

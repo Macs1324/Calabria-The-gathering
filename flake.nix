@@ -1,12 +1,12 @@
 {
-  # Calabria — camera-driven MTG dueling platform.
+  # Calabria: The Gathering — camera-driven MTG dueling platform.
   #
   # This devshell is the source of truth for tool versions. When project
   # dependencies change, keep it and server/Dockerfile up to date together.
   #
   # Usage:   nix develop
   # Non-fish fallback: nix develop -c $SHELL
-  description = "Calabria development environment";
+  description = "Calabria: The Gathering development environment";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

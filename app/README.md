@@ -1,4 +1,4 @@
-# Calabria desktop app
+# Calabria: The Gathering — client
 
 Tauri v2 + React client: webcam capture, scan/confirm flow, live battlefield.
 
