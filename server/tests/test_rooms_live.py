@@ -110,13 +110,6 @@ def test_rest_events_without_token_forbidden():
     assert res.status_code == 403
 
 
-def test_rest_join_conflict_409():
-    c = TestClient(create_app())
-    room_id = c.post("/rooms").json()["room_id"]
-    seat(c, room_id, "al")
-    assert c.post(f"/rooms/{room_id}/join", json={"name": "al"}).status_code == 409
-
-
 def test_rest_undo():
     c = TestClient(create_app())
     room_id = c.post("/rooms").json()["room_id"]
@@ -196,3 +189,57 @@ def test_corrupt_room_file_is_skipped(tmp_path):
     (tmp_path / "BAD1.json").write_text("{not json")
     store = RoomStore(tmp_path)
     assert store.get("BAD1") is None
+
+
+# --- review fixes: lost tokens, stale sockets, junk frames -----------------------
+
+
+def test_offline_seat_can_be_reclaimed_by_name():
+    store = RoomStore()
+    room = store.create()
+    old = store.join(room.id, "al")
+    new = store.join(room.id, "al", can_reclaim=lambda name: True)
+    assert new != old
+    assert store.seat_of(room.id, old) is None  # the lost token is revoked
+    assert store.seat_of(room.id, new) == "al"
+    assert room.state["players"] == ["al"]
+
+
+def test_rest_join_reclaims_seat_with_no_open_socket():
+    with TestClient(create_app()) as c:
+        room_id = c.post("/rooms").json()["room_id"]
+        seat(c, room_id, "al")
+        assert c.post(f"/rooms/{room_id}/join", json={"name": "al"}).status_code == 200
+
+
+def test_rest_join_refuses_name_that_is_online():
+    with TestClient(create_app()) as c:
+        room_id = c.post("/rooms").json()["room_id"]
+        al = seat(c, room_id, "al")["X-Seat-Token"]
+        with c.websocket_connect(f"/rooms/{room_id}/ws?token={al}") as ws:
+            ws.receive_json()
+            assert c.post(f"/rooms/{room_id}/join", json={"name": "al"}).status_code == 409
+
+
+def test_leavers_socket_becomes_spectator():
+    with TestClient(create_app()) as c:
+        room_id = c.post("/rooms").json()["room_id"]
+        al = seat(c, room_id, "al")["X-Seat-Token"]
+        with c.websocket_connect(f"/rooms/{room_id}/ws?token={al}") as ws:
+            ws.receive_json()
+            ws.send_json({"op": "event", "type": "player_leave"})
+            view = ws.receive_json()
+            assert view["you"] is None
+            assert view["online"] == []
+
+
+def test_ws_non_json_frame_is_an_error_not_a_disconnect():
+    with TestClient(create_app()) as c:
+        room_id = c.post("/rooms").json()["room_id"]
+        al = seat(c, room_id, "al")["X-Seat-Token"]
+        with c.websocket_connect(f"/rooms/{room_id}/ws?token={al}") as ws:
+            ws.receive_json()
+            ws.send_text("not json")
+            assert ws.receive_json()["kind"] == "error"
+            ws.send_json({"op": "event", "type": "life_change", "payload": {"delta": 1}})
+            assert ws.receive_json()["state"]["life"]["al"] == 21

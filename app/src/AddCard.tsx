@@ -10,6 +10,7 @@ import { RoomActions } from "./useRoom";
 export function AddCard({ send }: { send: RoomActions["send"] }) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<CardHit[]>([]);
+  const [hitsFor, setHitsFor] = useState(""); // the query `hits` answer
   const [active, setActive] = useState(0);
   const [zone, setZone] = useState<Zone>("battlefield");
   const [token, setToken] = useState(false);
@@ -29,6 +30,7 @@ export function AddCard({ send }: { send: RoomActions["send"] }) {
         .search(query, ctrl.signal)
         .then((res) => {
           setHits(res.results);
+          setHitsFor(query);
           setActive(0);
         })
         .catch(() => {
@@ -100,7 +102,9 @@ export function AddCard({ send }: { send: RoomActions["send"] }) {
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
               setActive((a) => Math.max(a - 1, 0));
-            } else if (e.key === "Enter" && hits[active]) {
+            } else if (e.key === "Enter" && hitsFor === query && hits[active]) {
+              // Only play what the visible results answer: no stale top hit
+              // from a shorter query while the new search is in flight.
               play(hits[active]);
             } else if (e.key === "Escape") {
               setQuery("");

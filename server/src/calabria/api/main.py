@@ -85,7 +85,7 @@ def create_app(
     )
     data_dir = data_dir if data_dir is not None else _relative_default_data_dir()
     app.state.rooms = room_store if room_store is not None else RoomStore(data_dir / "rooms")
-    app.state.hub = Hub()
+    app.state.hub = Hub(app.state.rooms)
     app.state.card_index = card_index if card_index is not None else load_persisted_index(data_dir)
     app.state.meta_store = meta_store if meta_store is not None else CardMetaStore(data_dir / "cards.db")
     app.state.card_search = CardSearch(
@@ -137,7 +137,13 @@ def _mount_routes(app: FastAPI) -> None:
     async def join_room(room_id: str, req: JoinRequest) -> dict[str, str]:
         room = _room(app, room_id)
         try:
-            token = app.state.rooms.join(room.id, req.name, token=req.token)
+            token = app.state.rooms.join(
+                room.id,
+                req.name,
+                token=req.token,
+                # A lost token (new device, cleared storage) can take back a seat nobody is using.
+                can_reclaim=lambda name: name not in app.state.hub.online(room.id, [name]),
+            )
         except ValueError as e:
             status = 409 if "taken" in str(e) else 400
             raise HTTPException(status_code=status, detail=str(e)) from e
@@ -168,13 +174,16 @@ def _mount_routes(app: FastAPI) -> None:
             await ws.close(code=4404, reason="unknown room")
             return
         await ws.accept()
-        you = app.state.rooms.seat_of(room.id, token)
         hub: Hub = app.state.hub
-        hub.add(room.id, ws, you)
+        hub.add(room.id, ws, token)
         try:
             await hub.broadcast(app, room.id)  # newcomer gets a view; others see presence
             while True:
-                msg = await ws.receive_json()
+                try:
+                    msg = await ws.receive_json()
+                except ValueError:  # not JSON: tell the sender, keep the socket
+                    await ws.send_json({"kind": "error", "detail": "messages must be JSON"})
+                    continue
                 try:
                     _ws_op(app, room.id, token, msg)
                 except HTTPException as e:
@@ -189,23 +198,31 @@ def _mount_routes(app: FastAPI) -> None:
 
 
 class Hub:
-    """Open room sockets and who they belong to (None = spectator)."""
+    """Open room sockets and their seat tokens (None = spectator).
 
-    def __init__(self) -> None:
+    Seats are resolved from tokens at broadcast time, not at connect time, so
+    a player who leaves (or whose token is revoked) turns into a spectator.
+    """
+
+    def __init__(self, rooms: RoomStore) -> None:
+        self._rooms = rooms
         self._sockets: dict[str, dict[WebSocket, str | None]] = {}
 
-    def add(self, room_id: str, ws: WebSocket, seat: str | None) -> None:
-        self._sockets.setdefault(room_id, {})[ws] = seat
+    def add(self, room_id: str, ws: WebSocket, token: str | None) -> None:
+        self._sockets.setdefault(room_id, {})[ws] = token
 
     def remove(self, room_id: str, ws: WebSocket) -> None:
         self._sockets.get(room_id, {}).pop(ws, None)
 
+    def _seats(self, room_id: str) -> dict[WebSocket, str | None]:
+        return {ws: self._rooms.seat_of(room_id, t) for ws, t in self._sockets.get(room_id, {}).items()}
+
     def online(self, room_id: str, players: list[str]) -> list[str]:
-        seats = set(self._sockets.get(room_id, {}).values())
+        seats = set(self._seats(room_id).values())
         return [p for p in players if p in seats]  # seat order, not connect order
 
     async def broadcast(self, app: FastAPI, room_id: str) -> None:
-        sockets = dict(self._sockets.get(room_id, {}))
+        sockets = self._seats(room_id)
         if not sockets:
             return
         room = app.state.rooms.get(room_id)

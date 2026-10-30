@@ -12,7 +12,8 @@ export function Camera({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState<string>("");
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null); // camera unusable
+  const [scanError, setScanError] = useState<string | null>(null); // last scan only
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState<ScannedCard | null>(null);
   const [size, setSize] = useState<[number, number]>([1280, 720]);
@@ -67,29 +68,30 @@ export function Camera({
       ?.drawImage(video, 0, 0, canvas.width, canvas.height);
     const b64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
     setBusy(true);
+    setScanError(null);
     try {
       const { cards } = await api.scan(b64);
       setSize([canvas.width, canvas.height]);
       setLast(cards[0] ?? null);
       onCandidates(cards[0]?.candidates ?? []);
     } catch (e) {
-      setProblem(`Scan failed: ${e instanceof Error ? e.message : String(e)}`);
+      setScanError(`Scan failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
   };
 
-  // Space scans, unless you're typing somewhere.
+  // Space scans, unless you're typing somewhere. A focused button would
+  // otherwise "click" on Space (re-ending the turn, closing the camera…), so
+  // take the key from it.
   const scanRef = useRef(scan);
   scanRef.current = scan;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        e.code !== "Space" ||
-        (e.target as HTMLElement).closest("input, textarea, select, button")
-      )
-        return;
+      const target = e.target as HTMLElement;
+      if (e.code !== "Space" || target.closest("input, textarea, select")) return;
       e.preventDefault();
+      if (target instanceof HTMLButtonElement) target.blur();
       scanRef.current();
     };
     window.addEventListener("keydown", onKey);
@@ -98,7 +100,7 @@ export function Camera({
 
   return (
     <div className="camera">
-      {problem && <p className="error">{problem}</p>}
+      {(problem || scanError) && <p className="error">{problem ?? scanError}</p>}
       <div className="video-wrap">
         <video ref={videoRef} autoPlay playsInline muted />
         {last && (
